@@ -140,3 +140,66 @@ class TestGetStatus:
             status = get_status()
         assert status["token"] == "not set"
         assert status["user"] == "not set"
+
+
+# ===================================================================
+# Interactive prompt paths
+# ===================================================================
+
+
+class TestGetTokenPrompt:
+    """Tests for get_token interactive prompt path (lines 52-56)."""
+
+    def test_prompt_stores_in_keychain(self, mock_keyring):
+        """prompt_if_missing=True, user enters token and confirms store."""
+        with patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("CONFLUENCE_TOKEN", None)
+            with (
+                patch("tsu_cli.auth.typer.prompt", return_value="prompted-token"),
+                patch("tsu_cli.auth.typer.confirm", return_value=True),
+                patch("tsu_cli.auth.console"),
+            ):
+                result = get_token(prompt_if_missing=True)
+        assert result == "prompted-token"
+        assert mock_keyring[(SERVICE_NAME, TOKEN_USERNAME)] == "prompted-token"
+
+    def test_prompt_declines_store(self, mock_keyring):
+        """prompt_if_missing=True, user enters token but declines keychain."""
+        with patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("CONFLUENCE_TOKEN", None)
+            with (
+                patch("tsu_cli.auth.typer.prompt", return_value="tmp-token"),
+                patch("tsu_cli.auth.typer.confirm", return_value=False),
+            ):
+                result = get_token(prompt_if_missing=True)
+        assert result == "tmp-token"
+        assert (SERVICE_NAME, TOKEN_USERNAME) not in mock_keyring
+
+
+class TestGetUserPrompt:
+    """Tests for get_user interactive prompt path (lines 82-86)."""
+
+    def test_prompt_stores_in_keychain(self, mock_keyring):
+        """prompt_if_missing=True, user enters email and confirms store."""
+        with patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("CONFLUENCE_USER", None)
+            with (
+                patch("tsu_cli.auth.typer.prompt", return_value="me@example.com"),
+                patch("tsu_cli.auth.typer.confirm", return_value=True),
+                patch("tsu_cli.auth.console"),
+            ):
+                result = get_user(prompt_if_missing=True)
+        assert result == "me@example.com"
+        assert mock_keyring[(SERVICE_NAME, USER_USERNAME)] == "me@example.com"
+
+    def test_prompt_declines_store(self, mock_keyring):
+        """prompt_if_missing=True, user enters email but declines keychain."""
+        with patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("CONFLUENCE_USER", None)
+            with (
+                patch("tsu_cli.auth.typer.prompt", return_value="me@example.com"),
+                patch("tsu_cli.auth.typer.confirm", return_value=False),
+            ):
+                result = get_user(prompt_if_missing=True)
+        assert result == "me@example.com"
+        assert (SERVICE_NAME, USER_USERNAME) not in mock_keyring

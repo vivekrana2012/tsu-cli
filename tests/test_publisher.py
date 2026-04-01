@@ -364,3 +364,316 @@ class TestCreateBlankPage:
             "New Blank Page",
         )
         assert result == "blank1"
+
+
+# ===================================================================
+# Additional coverage tests
+# ===================================================================
+
+
+class TestCreateBlankPageNoCredentials:
+    """Test create_blank_page with no credentials."""
+
+    @patch("tsu_cli.publisher.auth")
+    def test_no_token_raises(self, mock_auth):
+        """No token → NoCredentialsError."""
+        mock_auth.get_token.return_value = None
+        with pytest.raises(NoCredentialsError):
+            create_blank_page(
+                "https://example.atlassian.net/wiki/spaces/ENG/pages/111/Parent",
+                "Title",
+            )
+
+
+class TestCreateBlankPageSpaceKeyFallback:
+    """Test create_blank_page space key fallback to API."""
+
+    @patch("tsu_cli.publisher.auth")
+    @patch("tsu_cli.publisher.httpx.Client")
+    @patch("tsu_cli.publisher.resolve_page_id", return_value=("https://example.atlassian.net/wiki", "111"))
+    @patch("tsu_cli.publisher.extract_space_key_from_url", return_value=None)
+    @patch("tsu_cli.publisher.get_space_key_from_page", return_value="FALLBACK")
+    def test_fallback_to_api(self, mock_space_api, mock_space_url, mock_resolve, MockClient, mock_auth):
+        """No space key from URL → falls back to get_space_key_from_page."""
+        mock_auth.get_token.return_value = "tok"
+        client = _mock_client()
+        MockClient.return_value = client
+        resp = MagicMock()
+        resp.json.return_value = {"id": "new1"}
+        resp.raise_for_status = MagicMock()
+        client.post.return_value = resp
+
+        result = create_blank_page(
+            "https://example.atlassian.net/wiki/pages/viewpage.action?pageId=111",
+            "Title",
+        )
+        assert result == "new1"
+        mock_space_api.assert_called_once()
+
+
+class TestFetchPageHtmlNoParentUrl:
+    """Test fetch_page_html when parent_page_url is missing."""
+
+    def test_no_parent_url(self, tmp_project: Path):
+        """No parent_page_url → raises NoParentPageError."""
+        tsu_dir = tmp_project / ".tsu"
+        conf = json.loads((tsu_dir / "confluence.json").read_text())
+        conf["page_id"] = "123"
+        conf["parent_page_url"] = ""
+        (tsu_dir / "confluence.json").write_text(json.dumps(conf, indent=2) + "\n")
+
+        with pytest.raises(NoParentPageError):
+            fetch_page_html(tmp_project)
+
+
+class TestFetchPageHtmlNoCredentials:
+    """Test fetch_page_html when credentials are missing."""
+
+    @patch("tsu_cli.publisher.auth")
+    def test_no_token(self, mock_auth, tmp_project: Path):
+        """No token → raises NoCredentialsError."""
+        tsu_dir = tmp_project / ".tsu"
+        conf = json.loads((tsu_dir / "confluence.json").read_text())
+        conf["page_id"] = "123"
+        (tsu_dir / "confluence.json").write_text(json.dumps(conf, indent=2) + "\n")
+
+        mock_auth.get_token.return_value = None
+        with pytest.raises(NoCredentialsError):
+            fetch_page_html(tmp_project)
+
+
+class TestFetchPageHtml404:
+    """Test fetch_page_html when page returns 404."""
+
+    @patch("tsu_cli.publisher.auth")
+    @patch("tsu_cli.publisher.httpx.Client")
+    def test_page_404_returns_none(self, MockClient, mock_auth, tmp_project: Path):
+        """Page 404 → returns None."""
+        tsu_dir = tmp_project / ".tsu"
+        conf = json.loads((tsu_dir / "confluence.json").read_text())
+        conf["page_id"] = "gone"
+        (tsu_dir / "confluence.json").write_text(json.dumps(conf, indent=2) + "\n")
+
+        mock_auth.get_token.return_value = "tok"
+        client = _mock_client()
+        MockClient.return_value = client
+        resp = MagicMock()
+        resp.status_code = 404
+        client.get.return_value = resp
+
+        result = fetch_page_html(tmp_project)
+        assert result is None
+
+
+class TestFetchPageHtmlException:
+    """Test fetch_page_html when an exception occurs."""
+
+    @patch("tsu_cli.publisher.auth")
+    @patch("tsu_cli.publisher.httpx.Client")
+    def test_network_error_returns_none(self, MockClient, mock_auth, tmp_project: Path):
+        """Network error → returns None."""
+        tsu_dir = tmp_project / ".tsu"
+        conf = json.loads((tsu_dir / "confluence.json").read_text())
+        conf["page_id"] = "123"
+        (tsu_dir / "confluence.json").write_text(json.dumps(conf, indent=2) + "\n")
+
+        mock_auth.get_token.return_value = "tok"
+        client = _mock_client()
+        MockClient.return_value = client
+        client.get.side_effect = httpx.ConnectError("Connection refused")
+
+        result = fetch_page_html(tmp_project)
+        assert result is None
+
+
+class TestPushNoPageTitle:
+    """Test push when page_title is empty."""
+
+    def test_no_page_title(self, tmp_project: Path):
+        """Empty page_title → SystemExit(1)."""
+        tsu_dir = tmp_project / ".tsu"
+        conf = {"parent_page_url": "https://example.atlassian.net/wiki/spaces/ENG/pages/111/Parent", "page_title": "", "page_id": None}
+        (tsu_dir / "confluence.json").write_text(json.dumps(conf, indent=2) + "\n")
+        with pytest.raises(SystemExit):
+            push(tmp_project, "tech")
+
+
+class TestPushNoDocument:
+    """Test push when document file doesn't exist."""
+
+    def test_no_document(self, tmp_project: Path):
+        """Missing document.md → SystemExit(1)."""
+        # Ensure document.md does not exist (it shouldn't by default)
+        doc_path = tmp_project / ".tsu" / "document.md"
+        if doc_path.exists():
+            doc_path.unlink()
+        with pytest.raises(SystemExit):
+            push(tmp_project, "tech")
+
+
+class TestPushResolveErrors:
+    """Test push when resolve_page_id or space key resolution fails."""
+
+    def _setup_for_push(self, tmp_project: Path):
+        tsu_dir = tmp_project / ".tsu"
+        from tsu_cli.config import _confluence_filename, _document_filename
+        (tsu_dir / _document_filename("tech")).write_text("# Doc\nContent\n")
+
+    @patch("tsu_cli.publisher.auth")
+    @patch("tsu_cli.publisher.resolve_page_id", side_effect=Exception("Cannot resolve"))
+    def test_resolve_page_id_error(self, mock_resolve, mock_auth, tmp_project: Path):
+        """resolve_page_id fails → SystemExit(1)."""
+        self._setup_for_push(tmp_project)
+        mock_auth.get_user.return_value = "u@example.com"
+        mock_auth.get_token.return_value = "tok"
+        with pytest.raises(SystemExit):
+            push(tmp_project, "tech")
+
+    @patch("tsu_cli.publisher.auth")
+    @patch("tsu_cli.publisher.resolve_page_id", return_value=("https://example.atlassian.net/wiki", "111"))
+    @patch("tsu_cli.publisher.extract_space_key_from_url", return_value=None)
+    @patch("tsu_cli.publisher.get_space_key_from_page", side_effect=Exception("No space"))
+    def test_space_key_fallback_error(self, mock_space_api, mock_space_url, mock_resolve, mock_auth, tmp_project: Path):
+        """Space key fallback fails → SystemExit(1)."""
+        self._setup_for_push(tmp_project)
+        mock_auth.get_user.return_value = "u@example.com"
+        mock_auth.get_token.return_value = "tok"
+        with pytest.raises(SystemExit):
+            push(tmp_project, "tech")
+
+    @patch("tsu_cli.publisher.auth")
+    @patch("tsu_cli.publisher.resolve_page_id", return_value=("https://example.atlassian.net/wiki", "111"))
+    @patch("tsu_cli.publisher.extract_space_key_from_url", return_value=None)
+    @patch("tsu_cli.publisher.get_space_key_from_page", return_value="ENG")
+    @patch("tsu_cli.publisher.httpx.Client")
+    def test_space_key_fallback_success(self, MockClient, mock_space_api, mock_space_url, mock_resolve, mock_auth, tmp_project: Path):
+        """Space key fallback succeeds → page created."""
+        self._setup_for_push(tmp_project)
+        mock_auth.get_user.return_value = "u@example.com"
+        mock_auth.get_token.return_value = "tok"
+
+        client = _mock_client()
+        MockClient.return_value = client
+        resp = MagicMock()
+        resp.json.return_value = {"id": "new1", "_links": {"webui": "/pages/new1"}}
+        resp.raise_for_status = MagicMock()
+        client.post.return_value = resp
+
+        push(tmp_project, "tech")
+        mock_space_api.assert_called_once()
+
+
+class TestPushHttpError:
+    """Test push when Confluence API returns an HTTP error."""
+
+    def _setup_for_push(self, tmp_project: Path):
+        tsu_dir = tmp_project / ".tsu"
+        from tsu_cli.config import _document_filename
+        (tsu_dir / _document_filename("tech")).write_text("# Doc\nContent\n")
+
+    @patch("tsu_cli.publisher.auth")
+    @patch("tsu_cli.publisher.httpx.Client")
+    @patch("tsu_cli.publisher.resolve_page_id", return_value=("https://example.atlassian.net/wiki", "111"))
+    @patch("tsu_cli.publisher.extract_space_key_from_url", return_value="ENG")
+    def test_http_401(self, mock_space, mock_resolve, MockClient, mock_auth, tmp_project: Path):
+        """HTTP 401 → _handle_http_error called, SystemExit(1)."""
+        self._setup_for_push(tmp_project)
+        mock_auth.get_user.return_value = "u@example.com"
+        mock_auth.get_token.return_value = "tok"
+
+        client = _mock_client()
+        MockClient.return_value = client
+
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+        mock_response.json.return_value = {"message": "Unauthorized"}
+        mock_response.text = "Unauthorized"
+        error = httpx.HTTPStatusError("401", request=MagicMock(), response=mock_response)
+        client.post.side_effect = error
+
+        with pytest.raises(SystemExit):
+            push(tmp_project, "tech")
+
+    @patch("tsu_cli.publisher.auth")
+    @patch("tsu_cli.publisher.httpx.Client")
+    @patch("tsu_cli.publisher.resolve_page_id", return_value=("https://example.atlassian.net/wiki", "111"))
+    @patch("tsu_cli.publisher.extract_space_key_from_url", return_value="ENG")
+    def test_http_403(self, mock_space, mock_resolve, MockClient, mock_auth, tmp_project: Path):
+        """HTTP 403 → _handle_http_error, SystemExit(1)."""
+        self._setup_for_push(tmp_project)
+        mock_auth.get_user.return_value = "u@example.com"
+        mock_auth.get_token.return_value = "tok"
+
+        client = _mock_client()
+        MockClient.return_value = client
+
+        mock_response = MagicMock()
+        mock_response.status_code = 403
+        mock_response.json.return_value = {"message": "Forbidden"}
+        mock_response.text = "Forbidden"
+        error = httpx.HTTPStatusError("403", request=MagicMock(), response=mock_response)
+        client.post.side_effect = error
+
+        with pytest.raises(SystemExit):
+            push(tmp_project, "tech")
+
+    @patch("tsu_cli.publisher.auth")
+    @patch("tsu_cli.publisher.httpx.Client")
+    @patch("tsu_cli.publisher.resolve_page_id", return_value=("https://example.atlassian.net/wiki", "111"))
+    @patch("tsu_cli.publisher.extract_space_key_from_url", return_value="ENG")
+    def test_http_500(self, mock_space, mock_resolve, MockClient, mock_auth, tmp_project: Path):
+        """HTTP 500 → _handle_http_error generic branch, SystemExit(1)."""
+        self._setup_for_push(tmp_project)
+        mock_auth.get_user.return_value = "u@example.com"
+        mock_auth.get_token.return_value = "tok"
+
+        client = _mock_client()
+        MockClient.return_value = client
+
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.json.return_value = {"message": "Server Error"}
+        mock_response.text = "Server Error"
+        error = httpx.HTTPStatusError("500", request=MagicMock(), response=mock_response)
+        client.post.side_effect = error
+
+        with pytest.raises(SystemExit):
+            push(tmp_project, "tech")
+
+    @patch("tsu_cli.publisher.auth")
+    @patch("tsu_cli.publisher.httpx.Client")
+    @patch("tsu_cli.publisher.resolve_page_id", return_value=("https://example.atlassian.net/wiki", "111"))
+    @patch("tsu_cli.publisher.extract_space_key_from_url", return_value="ENG")
+    def test_http_404_error(self, mock_space, mock_resolve, MockClient, mock_auth, tmp_project: Path):
+        """HTTP 404 from API → _handle_http_error 404 branch, SystemExit(1)."""
+        self._setup_for_push(tmp_project)
+        mock_auth.get_user.return_value = "u@example.com"
+        mock_auth.get_token.return_value = "tok"
+
+        client = _mock_client()
+        MockClient.return_value = client
+
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        mock_response.json.return_value = {"message": "Not Found"}
+        mock_response.text = "Not Found"
+        error = httpx.HTTPStatusError("404", request=MagicMock(), response=mock_response)
+        client.post.side_effect = error
+
+        with pytest.raises(SystemExit):
+            push(tmp_project, "tech")
+
+
+class TestHandleHttpErrorNonJsonBody:
+    """Test _handle_http_error when response body is not JSON."""
+
+    def test_non_json_body(self):
+        """Non-JSON response → falls back to response.text."""
+        from tsu_cli.publisher import _handle_http_error
+
+        mock_response = MagicMock()
+        mock_response.status_code = 502
+        mock_response.json.side_effect = ValueError("Not JSON")
+        mock_response.text = "Bad Gateway"
+        error = httpx.HTTPStatusError("502", request=MagicMock(), response=mock_response)
+        _handle_http_error(error)

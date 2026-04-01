@@ -10,6 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 from tsu_cli.main import app
+from tsu_cli.publisher import NoPageIDError
 
 
 @pytest.fixture
@@ -308,3 +309,111 @@ class TestErrorPaths:
             ["generate", "--dir", str(tmp_path)],
         )
         assert result.exit_code != 0
+
+
+# ===================================================================
+# Additional coverage tests
+# ===================================================================
+
+
+class TestListProfilesNotInitialized:
+    """list-profiles when .tsu/ doesn't exist."""
+
+    def test_not_initialized(self, runner: CliRunner, tmp_path: Path):
+        """Not initialized → exit code 1."""
+        result = runner.invoke(app, ["list-profiles", "--dir", str(tmp_path)])
+        assert result.exit_code != 0
+        assert "not initialized" in result.stdout.lower() or "tsu init" in result.stdout.lower()
+
+
+class TestListProfilesEmpty:
+    """list-profiles when .tsu/ exists but no profiles."""
+
+    def test_no_profiles(self, runner: CliRunner, tmp_path: Path):
+        """No profiles → shows warning."""
+        tsu_dir = tmp_path / ".tsu"
+        tsu_dir.mkdir()
+        (tsu_dir / "config.json").write_text(json.dumps({"model": "gpt-4o"}))
+        result = runner.invoke(app, ["list-profiles", "--dir", str(tmp_path)])
+        assert "no profiles" in result.stdout.lower()
+
+
+class TestModelsEmpty:
+    """tsu models when no models available."""
+
+    @patch("tsu_cli.main.generator.list_models", return_value=[])
+    def test_empty_models(self, mock_models, runner: CliRunner):
+        """No models → exit code 1."""
+        result = runner.invoke(app, ["models"])
+        assert result.exit_code != 0
+
+
+class TestGenerateSyncPaths:
+    """Test generate with Confluence sync paths."""
+
+    @patch("tsu_cli.main.generator.generate")
+    @patch("tsu_cli.main.publisher.fetch_page_html", return_value="<p>Existing</p>")
+    def test_sync_with_existing_page(self, mock_fetch, mock_gen, runner: CliRunner, tmp_path: Path):
+        """Sync finds existing page → passes HTML to generator."""
+        _init_tsu(tmp_path)
+        mock_gen.return_value = tmp_path / ".tsu" / "document.md"
+        result = runner.invoke(app, ["generate", "--dir", str(tmp_path)])
+        mock_gen.assert_called_once()
+        # existing_html should be passed (5th positional arg)
+        call_kwargs = mock_gen.call_args
+        assert "<p>Existing</p>" in (call_kwargs.args + tuple(call_kwargs.kwargs.values()))
+
+    @patch("tsu_cli.main.generator.generate")
+    @patch("tsu_cli.main.publisher.fetch_page_html", side_effect=Exception("Network error"))
+    def test_sync_exception_aborts(self, mock_fetch, mock_gen, runner: CliRunner, tmp_path: Path):
+        """Sync raises non-NoPageIDError exception → aborts."""
+        _init_tsu(tmp_path)
+        result = runner.invoke(app, ["generate", "--dir", str(tmp_path)])
+        assert result.exit_code != 0
+
+    @patch("tsu_cli.main.generator.generate")
+    @patch("tsu_cli.main.publisher.fetch_page_html", side_effect=NoPageIDError("No page"))
+    def test_sync_no_page_id_continues(self, mock_fetch, mock_gen, runner: CliRunner, tmp_path: Path):
+        """NoPageIDError during sync → continues generation."""
+        _init_tsu(tmp_path)
+        mock_gen.return_value = tmp_path / ".tsu" / "document.md"
+        result = runner.invoke(app, ["generate", "--dir", str(tmp_path)])
+        mock_gen.assert_called_once()
+
+
+class TestPushNotInitialized:
+    """push when .tsu/ doesn't exist."""
+
+    def test_not_initialized(self, runner: CliRunner, tmp_path: Path):
+        """Not initialized → exit code 1."""
+        result = runner.invoke(app, ["push", "--dir", str(tmp_path)])
+        assert result.exit_code != 0
+
+    def test_no_parent_page_url(self, runner: CliRunner, tmp_path: Path):
+        """No parent_page_url → exit code 1."""
+        _init_tsu(tmp_path)
+        tsu_dir = tmp_path / ".tsu"
+        conf = json.loads((tsu_dir / "confluence.json").read_text())
+        conf["parent_page_url"] = ""
+        (tsu_dir / "confluence.json").write_text(json.dumps(conf, indent=2) + "\n")
+        result = runner.invoke(app, ["push", "--dir", str(tmp_path)])
+        assert result.exit_code != 0
+
+
+class TestAuthStatusDisplay:
+    """Test auth status display for all source types."""
+
+    @patch("tsu_cli.main.auth.get_status", return_value={"token": "not set", "user": "not set"})
+    def test_not_set(self, mock_status, runner: CliRunner):
+        """Not configured → shows 'not set'."""
+        result = runner.invoke(app, ["auth", "status"])
+        assert "not configured" in result.stdout.lower() or "not set" in result.stdout.lower()
+
+
+class TestHelpCommand:
+    """Test tsu help command."""
+
+    def test_shows_help(self, runner: CliRunner):
+        """tsu help → renders help.md content."""
+        result = runner.invoke(app, ["help"])
+        assert result.exit_code == 0 or result.exit_code is None
