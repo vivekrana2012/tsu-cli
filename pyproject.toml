@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
 authors = [
-    # { name = "Vivek Rana", email = "vivekrana.2012@gmail.com" },
+    { name = "Vivek Rana", email = "vivekrana.2012@gmail.com" },
 ]
 keywords = ["documentation", "confluence", "copilot", "cli", "markdown"]
 classifiers = [
@@ -45,10 +45,10 @@ dev = [
 [project.scripts]
 tsu = "tsu_cli.main:app"
 
-# [project.urls]
-# Homepage = "https://github.com/vivekrana2012/tsu-cli"
-# Repository = "https://github.com/vivekrana2012/tsu-cli.git"
-# Issues = "https://github.com/vivekrana2012/tsu-cli/issues"
+[project.urls]
+Homepage = "https://github.com/vivekrana2012/tsu-cli"
+Repository = "https://github.com/vivekrana2012/tsu-cli.git"
+Issues = "https://github.com/vivekrana2012/tsu-cli/issues"
 
 [tool.setuptools]
 packages = ["tsu_cli", "tsu_cli.prompts"]

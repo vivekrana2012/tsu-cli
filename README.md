@@ -11,7 +11,15 @@ Generate project tech documentation using GitHub Copilot SDK and push to Conflue
 ## Installation
 
 ```bash
-pip install -e .
+pip install tsu-cli
+```
+
+### Development install
+
+```bash
+git clone https://github.com/vivekrana2012/tsu-cli.git
+cd tsu-cli
+pip install -e ".[dev]"
 ```
 
 ## Quick Start
