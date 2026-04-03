@@ -1,6 +1,12 @@
 # tsu-cli
 
-Generate project tech documentation using GitHub Copilot SDK and push to Confluence.
+Generate project documentation using GitHub Copilot SDK and integrate with document storage tools like Confluence.
+
+## ⚠️ AI Usage Disclosure
+This project was developed with the assistance of Artificial Intelligence (AI) tools, including [e.g., Claude/Copilot]. While I have reviewed, verified and tested the code, portions of the codebase were generated automatically.
+
+*   **Human Review:** The code has been reviewed by me for accuracy, but potential bugs or edge cases may exist.
+*   **Best Practice:** Users are encouraged to carefully inspect code before using it in production environments.
 
 ## Prerequisites
 
