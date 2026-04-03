@@ -34,7 +34,7 @@ then publish it to Confluence.
 
 ```bash
 cd /path/to/your/project
-tsu init                    # set up model, Confluence target, prompt template
+tsu init                    # set up model, Confluence target, prompt file
 tsu generate                # analyze codebase → .tsu/document.md
 tsu push                    # upload to Confluence
 ```
@@ -44,7 +44,7 @@ tsu push                    # upload to Confluence
 ## 2. Multiple Document Profiles
 
 Use profiles to generate different types of documentation from the same
-codebase — each with its own prompt template, output file, and Confluence page.
+codebase — each with its own prompt file, output file, and Confluence page.
 
 ```
                            ┌──────────────────┐
@@ -124,15 +124,15 @@ clean regeneration without pulling the remote page first.
 
 ---
 
-## 4. Org-Wide Standard Templates
+## 4. Org-Wide Standard Profiles
 
-Distribute a shared `generate.md` template across teams so every project
+Distribute a shared `generate.md` prompt file across teams so every project
 produces documentation with the same structure and level of detail.
 
 ```
 ┌───────────────────────────────┐
 │  Shared repo / artifact       │
-│  └─ templates/                │
+│  └─ profiles/                 │
 │     ├─ generate-standard.md   │     ┌──────────────────┐
 │     ├─ generate-api.md        │────▶│  Team A project  │
 │     └─ generate-security.md   │     │  .tsu/generate.md│
@@ -147,26 +147,26 @@ produces documentation with the same structure and level of detail.
 ### Setup
 
 1. Create a shared repository or artifact containing your organisation's
-   prompt templates.
+   prompt files.
 2. After running `tsu init`, replace the default `.tsu/generate.md` with your
-   standard template:
+   standard profile:
    ```bash
    tsu init
-   cp /path/to/templates/generate-standard.md .tsu/generate.md
+   cp /path/to/profiles/generate-standard.md .tsu/generate.md
    ```
-3. Commit `.tsu/generate.md` to the project repo so the template travels with
+3. Commit `.tsu/generate.md` to the project repo so the prompt file travels with
    the codebase.
-4. Re-running `tsu init` will **not** overwrite an existing template, so
-   manual edits and org templates are preserved.
+4. Re-running `tsu init` will **not** overwrite an existing prompt file, so
+   manual edits and org profiles are preserved.
 
 ### Combining with profiles
 
 ```bash
 tsu init --profile api
-cp /path/to/templates/generate-api.md .tsu/generate-api.md
+cp /path/to/profiles/generate-api.md .tsu/generate-api.md
 
 tsu init --profile security
-cp /path/to/templates/generate-security.md .tsu/generate-security.md
+cp /path/to/profiles/generate-security.md .tsu/generate-security.md
 ```
 
 ---

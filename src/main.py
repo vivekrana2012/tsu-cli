@@ -68,12 +68,12 @@ def profiles_command(
         help="Project directory (defaults to current directory).",
     ),
 ) -> None:
-    """List initialized profiles and available built-in templates."""
+    """List initialized profiles and available built-in profiles."""
     project_dir = project_dir or Path.cwd()
 
     initialized = config.is_initialized(project_dir)
     profiles = config.list_profiles(project_dir) if initialized else []
-    builtin = config.list_builtin_templates()
+    builtin = config.list_builtin_profiles()
 
     # --- Initialized profiles ---
     if profiles:
@@ -95,10 +95,10 @@ def profiles_command(
     else:
         console.print("\n[yellow]No initialized profiles.[/yellow] Run [bold]tsu init[/bold] to get started.")
 
-    # --- Available built-in templates (not yet initialized) ---
+    # --- Available built-in profiles (not yet initialized) ---
     available = {k: v for k, v in builtin.items() if k not in profiles}
     if available:
-        avail_table = Table(title="Available Templates")
+        avail_table = Table(title="Available Profiles")
         avail_table.add_column("Profile", style="bold")
         avail_table.add_column("Description")
 
@@ -107,7 +107,7 @@ def profiles_command(
 
         console.print()
         console.print(avail_table)
-        console.print("\n[dim]Run [bold]tsu init --profile <name>[/bold] to initialize a template.[/dim]")
+        console.print("\n[dim]Run [bold]tsu init --profile <name>[/bold] to initialize a profile.[/dim]")
 
     console.print()
 
@@ -150,7 +150,7 @@ def init(
 ) -> None:
     """Initialize tsu-cli in the current project directory.
 
-    Creates .tsu/config.json and profile-specific files (prompt template,
+    Creates .tsu/config.json and profile-specific files (prompt file,
     confluence config) with interactive prompts.
     """
     project_dir = project_dir or Path.cwd()
@@ -224,7 +224,7 @@ def init(
     confluence_path = config.write_confluence(confluence_data, project_dir, profile)
     console.print(f"[green]✓[/green] Created {confluence_path}")
 
-    # --- Seed prompt template ---
+    # --- Seed prompt file ---
     prompt_path = config.seed_prompt(project_dir, profile)
     console.print(f"[green]✓[/green] Created {prompt_path}")
 

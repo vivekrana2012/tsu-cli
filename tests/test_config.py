@@ -157,7 +157,7 @@ class TestSeedPrompt:
     """Tests #26-27: seed_prompt file creation."""
 
     def test_creates_file(self, tmp_path: Path):
-        """#26 seed_prompt creates prompt file from built-in template."""
+        """#26 seed_prompt creates prompt file from built-in prompt."""
         tsu_dir = tmp_path / ".tsu"
         tsu_dir.mkdir()
         path = seed_prompt(tmp_path)
@@ -295,24 +295,24 @@ class TestProfileIsolation:
 
 
 # ===================================================================
-# seed_prompt auto-matching built-in templates
+# seed_prompt auto-matching built-in profiles
 # ===================================================================
 
 
 class TestSeedPromptAutoMatch:
-    """seed_prompt uses profile-specific built-in templates when available."""
+    """seed_prompt uses profile-specific built-in prompts when available."""
 
-    def test_api_profile_uses_api_template(self, tmp_path: Path):
+    def test_api_profile_uses_api_prompt(self, tmp_path: Path):
         """tsu init --profile api_spec seeds from generate-api_spec.md, not generic."""
         tsu_dir = tmp_path / ".tsu"
         tsu_dir.mkdir()
         path = seed_prompt(tmp_path, profile="api_spec")
         assert path.name == "generate-api_spec.md"
         content = path.read_text(encoding="utf-8")
-        # The API template mentions endpoints/schemas, not generic tech overview
+        # The API profile mentions endpoints/schemas, not generic tech overview
         assert "api" in content.lower() or "endpoint" in content.lower()
 
-    def test_func_profile_uses_func_template(self, tmp_path: Path):
+    def test_func_profile_uses_func_prompt(self, tmp_path: Path):
         """tsu init --profile func_spec seeds from generate-func_spec.md."""
         tsu_dir = tmp_path / ".tsu"
         tsu_dir.mkdir()
@@ -321,7 +321,7 @@ class TestSeedPromptAutoMatch:
         content = path.read_text(encoding="utf-8")
         assert "business" in content.lower() or "workflow" in content.lower()
 
-    def test_security_profile_uses_security_template(self, tmp_path: Path):
+    def test_security_profile_uses_security_prompt(self, tmp_path: Path):
         """tsu init --profile security_spec seeds from generate-security_spec.md."""
         tsu_dir = tmp_path / ".tsu"
         tsu_dir.mkdir()
@@ -341,7 +341,7 @@ class TestSeedPromptAutoMatch:
         assert "tech stack" in content.lower() or "architecture" in content.lower()
 
     def test_auto_match_still_idempotent(self, tmp_path: Path):
-        """Existing template is not overwritten even with auto-match."""
+        """Existing prompt is not overwritten even with auto-match."""
         tsu_dir = tmp_path / ".tsu"
         tsu_dir.mkdir()
         path = seed_prompt(tmp_path, profile="api_spec")
@@ -352,29 +352,29 @@ class TestSeedPromptAutoMatch:
 
 
 # ===================================================================
-# list_builtin_templates
+# list_builtin_profiles
 # ===================================================================
 
 
-class TestListBuiltinTemplates:
-    """list_builtin_templates discovers built-in profile templates."""
+class TestListBuiltinProfiles:
+    """list_builtin_profiles discovers built-in profiles."""
 
-    def test_returns_expected_templates(self):
+    def test_returns_expected_profiles(self):
         """Returns api, func, security with descriptions."""
-        from tsu_cli.config import list_builtin_templates
+        from tsu_cli.config import list_builtin_profiles
 
-        templates = list_builtin_templates()
-        assert "api_spec" in templates
-        assert "func_spec" in templates
-        assert "security_spec" in templates
+        profiles = list_builtin_profiles()
+        assert "api_spec" in profiles
+        assert "func_spec" in profiles
+        assert "security_spec" in profiles
         # Each has a non-empty description
-        for desc in templates.values():
+        for desc in profiles.values():
             assert len(desc) > 0
 
     def test_sorted(self):
-        """Templates are returned in sorted order."""
-        from tsu_cli.config import list_builtin_templates
+        """Profiles are returned in sorted order."""
+        from tsu_cli.config import list_builtin_profiles
 
-        templates = list_builtin_templates()
-        keys = list(templates.keys())
+        profiles = list_builtin_profiles()
+        keys = list(profiles.keys())
         assert keys == sorted(keys)

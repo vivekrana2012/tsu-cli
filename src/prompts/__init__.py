@@ -1,4 +1,4 @@
-"""Built-in prompt templates for tsu-cli.
+"""Built-in prompts for tsu-cli.
 
 This package exists so that ``importlib.resources`` can locate the bundled
 prompt files.

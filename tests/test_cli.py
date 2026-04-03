@@ -231,8 +231,8 @@ class TestProfiles:
         assert "My Tech Docs" in result.stdout
         assert "Operations Runbook" in result.stdout
 
-    def test_shows_available_templates(self, runner: CliRunner, tmp_path: Path):
-        """Available templates section shows built-in templates not yet initialized."""
+    def test_shows_available_profiles(self, runner: CliRunner, tmp_path: Path):
+        """Available profiles section shows built-in profiles not yet initialized."""
         _init_tsu(tmp_path, "tech", page_title="Tech Overview")
 
         result = runner.invoke(
@@ -240,13 +240,13 @@ class TestProfiles:
             ["profiles", "--dir", str(tmp_path)],
         )
         assert result.exit_code == 0 or result.exit_code is None
-        # Built-in templates (api_spec, business_rules, security_spec) should appear as available
+        # Built-in profiles (api_spec, func_spec, security_spec) should appear as available
         assert "api_spec" in result.stdout.lower()
         assert "func_spec" in result.stdout.lower()
         assert "security_spec" in result.stdout.lower()
 
     def test_hides_initialized_from_available(self, runner: CliRunner, tmp_path: Path):
-        """Initialized built-in profiles don't appear in Available Templates."""
+        """Initialized built-in profiles don't appear in Available Profiles."""
         _init_tsu(tmp_path, "tech", page_title="Tech Overview")
         _init_tsu(tmp_path, "api_spec", page_title="API Spec")
 
@@ -346,9 +346,9 @@ class TestProfilesNotInitialized:
     """profiles when .tsu/ doesn't exist."""
 
     def test_not_initialized(self, runner: CliRunner, tmp_path: Path):
-        """Not initialized → shows available templates + no initialized message."""
+        """Not initialized → shows available profiles + no initialized message."""
         result = runner.invoke(app, ["profiles", "--dir", str(tmp_path)])
-        # Should still show available templates even without .tsu/
+        # Should still show available profiles even without .tsu/
         assert "no initialized" in result.stdout.lower() or "tsu init" in result.stdout.lower()
 
 
@@ -356,7 +356,7 @@ class TestProfilesEmpty:
     """profiles when .tsu/ exists but no profiles."""
 
     def test_no_profiles(self, runner: CliRunner, tmp_path: Path):
-        """No profiles → shows no initialized + available templates."""
+        """No profiles → shows no initialized + available profiles."""
         tsu_dir = tmp_path / ".tsu"
         tsu_dir.mkdir()
         (tsu_dir / "config.json").write_text(json.dumps({"model": "gpt-4o"}))

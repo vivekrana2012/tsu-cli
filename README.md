@@ -44,7 +44,7 @@ tsu push
 
 ### What happens during setup
 
-1. **`tsu init`** creates a `.tsu/` directory with configuration and a prompt template.
+1. **`tsu init`** creates a `.tsu/` directory with configuration and a prompt file.
 2. If you provide a Confluence parent page URL and credentials, a blank placeholder
    page is created immediately — locking the `page_id` so future pushes (including
    CI/CD) update the same page instead of creating duplicates.
@@ -133,14 +133,13 @@ tsu pull --profile func
 | `-d, --dir` | Project directory | current directory |
 | `-p, --profile` | Profile name | `tech` |
 
-### `tsu list-profiles`
+### `tsu profiles`
 
-Show all initialized profiles with their prompt file, Confluence page title,
-and page ID.
+Show all initialized profiles and available built-in profiles.
 
 ```bash
-tsu list-profiles
-tsu list-profiles --dir /path/to/project
+tsu profiles
+tsu profiles --dir /path/to/project
 ```
 
 ### `tsu models`
@@ -183,26 +182,43 @@ tsu -v
 
 Profiles let you maintain **multiple independent documents** from the same
 project — for example a *tech overview*, a *functional spec*, and an *API
-reference* — each with its own prompt template, Confluence page, and output
+reference* — each with its own prompt file, Confluence page, and output
 file.
 
 The default profile is **`tech`**. Create additional profiles by passing
 `--profile <name>` to `init`, `generate`, `push`, or `pull`.
 
+### Built-in profiles
+
+Three pre-defined profiles ship with tsu-cli. When you init a profile whose
+name matches a built-in profile, the tailored prompt is seeded automatically
+instead of the generic tech profile:
+
+| Profile name | Focus |
+| ------------ | ----- |
+| `api_spec` | API endpoints, request/response schemas, auth, error codes |
+| `func_spec` | Business rules, workflows, validation logic, data transformations |
+| `security_spec` | Auth mechanisms, data handling, input validation, threat surface |
+
+Run `tsu profiles` to see which profiles are available and which are already
+initialized.
+
 ### Creating and using profiles
 
 ```bash
-# Initialize profiles
-tsu init                        # creates the default "tech" profile
-tsu init --profile func         # creates a "func" profile
-tsu init --profile api          # creates an "api" profile
+# Initialize profiles (built-in profiles are seeded automatically)
+tsu init                            # default "tech" profile
+tsu init --profile api_spec         # API specification
+tsu init --profile func_spec        # functional specification
+tsu init --profile security_spec    # security overview
+tsu init --profile custom-name      # custom profile (uses generic prompt)
 
 # Generate & push per profile
-tsu generate --profile func
-tsu push --profile api
+tsu generate --profile api_spec
+tsu push --profile func_spec
 
-# See all profiles
-tsu list-profiles
+# See all profiles + available profiles
+tsu profiles
 ```
 
 ### Per-profile files
@@ -212,13 +228,13 @@ Each profile gets its own set of files inside `.tsu/`:
 | File type | `tech` (default) | Custom profile `{name}` |
 | --------- | ----------------- | ----------------------- |
 | Confluence config | `confluence.json` | `confluence-{name}.json` |
-| Prompt template | `generate.md` | `generate-{name}.md` |
+| Prompt file | `generate.md` | `generate-{name}.md` |
 | Generated output | `document.md` | `document-{name}.md` |
 
 `config.json` (model selection) is shared across all profiles.
 
 Re-running `tsu init` for an existing profile preserves the `page_id` and
-will not overwrite an edited prompt template.
+will not overwrite an edited prompt file.
 
 ## Configuration
 
@@ -228,7 +244,7 @@ All config lives in `.tsu/` (safe to commit — no secrets):
 | ---- | ------- |
 | `config.json` | Shared tool settings (LLM model) |
 | `confluence.json` | Confluence page target (per profile) |
-| `generate.md` | Prompt template (per profile, editable) |
+| `generate.md` | Prompt file (per profile, editable) |
 | `document.md` | Generated documentation (per profile) |
 
 ### Confluence Credentials
@@ -243,14 +259,14 @@ Use environment variables for CI/CD pipelines.
 
 ## Customizing the Prompt
 
-`tsu init` copies the default prompt template to `.tsu/generate.md` (or
+`tsu init` copies the default prompt file to `.tsu/generate.md` (or
 `.tsu/generate-{profile}.md` for custom profiles). Edit it freely — your
 changes are used on every subsequent `tsu generate` run, and re-running
-`tsu init` will **not** overwrite an existing template.
+`tsu init` will **not** overwrite an existing prompt file.
 
 ### Default sections
 
-The template ships with six sections. You can add, remove, reorder, or
+The default profile ships with six sections. You can add, remove, reorder, or
 rewrite any of them:
 
 | # | Section | Format |
@@ -268,7 +284,7 @@ rewrite any of them:
 - **Remove a section** — delete the heading and its instructions from the file.
 - **Change detail level** — rewrite the instructions under a heading (e.g.
   "Write a single paragraph" instead of "Use a table").
-- **One-off tweaks** — use `--extra` without editing the template:
+- **One-off tweaks** — use `--extra` without editing the prompt file:
   ```bash
   tsu generate --extra "Focus on the authentication flow"
   tsu generate --extra "Write in Japanese"

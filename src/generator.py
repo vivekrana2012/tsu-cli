@@ -144,7 +144,7 @@ async def _run_generation(
     prompt_path = get_prompt_path(project_dir, profile)
     if not prompt_path.exists():
         console.print(
-            "[red]Error:[/red] Prompt template not found at "
+            "[red]Error:[/red] Prompt file not found at "
             f"{prompt_path}\nRun [bold]tsu init --profile {profile}[/bold] first."
         )
         raise SystemExit(1)

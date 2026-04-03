@@ -30,7 +30,7 @@ Run this once per project (and once per profile). It creates a `.tsu/` directory
 | ------------------ | ------------------------------------ |
 | `config.json`      | Tool settings (LLM model)            |
 | `confluence.json`  | Confluence page target (per profile) |
-| `generate.md`      | Prompt template (editable, per profile) |
+| `generate.md`      | Prompt file (editable, per profile) |
 
 The whole `.tsu/` directory is safe to commit — no secrets are stored on disk.
 
@@ -39,12 +39,31 @@ The whole `.tsu/` directory is safe to commit — no secrets are stored on disk.
 Use `--profile` to initialize additional document types:
 
 ```bash
-tsu init                     # default 'tech' profile
-tsu init --profile func      # add a 'func' profile
-tsu init --profile api       # add an 'api' profile
+tsu init                          # default 'tech' profile
+tsu init --profile api_spec       # add an API specification profile
+tsu init --profile func_spec      # add a functional specification profile
+tsu init --profile security_spec  # add a security overview profile
+tsu init --profile custom-name    # add a custom profile
 ```
 
-Each profile gets its own prompt template, Confluence page target, and output
+**Built-in profiles:**
+
+Three pre-defined profiles ship with tsu-cli. When a profile name matches a
+built-in profile, the tailored prompt is seeded automatically instead of the
+generic tech prompt:
+
+| Profile name    | Focus                                                     |
+| --------------- | --------------------------------------------------------- |
+| `api_spec`      | API endpoints, request/response schemas, auth, error codes|
+| `func_spec`     | Business rules, workflows, validation logic, data transforms |
+| `security_spec` | Auth mechanisms, data handling, input validation, threat surface |
+
+For any other profile name, the generic tech prompt is seeded and you
+customize it manually.
+
+Run `tsu profiles` to see available profiles and initialized profiles.
+
+Each profile gets its own prompt file, Confluence page target, and output
 file. The default `tech` profile uses `generate.md`, `confluence.json`, and
 `document.md`. Custom profiles use `generate-{name}.md`, `confluence-{name}.json`,
 and `document-{name}.md`.
@@ -85,8 +104,8 @@ tsu init
 # Initialize a different project
 tsu init --dir /path/to/other/project
 
-# Add a functional rules profile
-tsu init --profile func
+# Add a functional specification profile
+tsu init --profile func_spec
 ```
 
 ---
@@ -99,7 +118,7 @@ This file is a Jinja2 template that instructs the Copilot agent on how to
 analyze your project and what sections to produce.
 
 For the `tech` profile, the seeded prompt works as-is. For custom profiles,
-you **must** edit the seeded template to replace the tech-specific sections
+you **must** edit the seeded prompt to replace the tech-specific sections
 with your own document structure (e.g. business rules, validation logic, etc.).
 
 **Default sections produced:**
@@ -121,11 +140,11 @@ with your own document structure (e.g. business rules, validation logic, etc.).
 - **Rewrite instructions** — change diagram style, level of detail, language, etc.
 - **Change the output format** — request different table structures, bullet lists, etc.
 
-**Template variable:**
+**Jinja2 variable:**
 
-The placeholder `{{ additional_instructions }}` in the template is replaced at
+The placeholder `{{ additional_instructions }}` in the prompt file is replaced at
 generation time by whatever you pass via `--extra`. You don't need to modify
-the template to use `--extra` — it just appends to the end.
+the prompt to use `--extra` — it just appends to the end.
 
 **Important:** Re-running `tsu init` will **not** overwrite an existing
 `.tsu/generate.md`, so your edits are always safe.
@@ -183,7 +202,7 @@ tsu generate --model claude-sonnet-4.5
 # Save to a custom path
 tsu generate --output docs/tech-overview.md
 
-# Add one-off instructions without editing the template
+# Add one-off instructions without editing the prompt
 tsu generate --extra "Focus on the authentication flow"
 
 # Write documentation in a different language
@@ -193,8 +212,8 @@ tsu generate --extra "Write in Japanese"
 tsu generate -m gpt-4o -e "Skip the dependencies section"
 
 # Generate for a specific profile
-tsu generate --profile func
-tsu generate --profile api --model claude-sonnet-4.5
+tsu generate --profile func_spec
+tsu generate --profile api_spec --model claude-sonnet-4.5
 ```
 
 **Model validation:**
@@ -225,7 +244,7 @@ Uploads `.tsu/document.md` to Confluence as a page.
 ```bash
 tsu push
 tsu push --dir /path/to/project
-tsu push --profile func
+tsu push --profile func_spec
 ```
 
 ---
@@ -287,11 +306,11 @@ cat .tsu/document.md                              # review the output
 tsu generate --extra "Add more detail to the API section"   # re-generate with tweaks
 tsu push                                          # upload to Confluence
 
-# Add a functional rules profile
-tsu init --profile func
-vim .tsu/generate-func.md                         # customize for functional rules
-tsu generate --profile func                       # generate → .tsu/document-func.md
-tsu push --profile func                           # push to separate Confluence page
+# Add a functional specification profile
+tsu init --profile func_spec
+vim .tsu/generate-func_spec.md                       # customize for functional rules
+tsu generate --profile func_spec                     # generate → .tsu/document-func_spec.md
+tsu push --profile func_spec                         # push to separate Confluence page
 ```
 
 After the initial setup, the day-to-day loop is just:
@@ -307,7 +326,7 @@ After the initial setup, the day-to-day loop is just:
 | `.tsu/config.json`            | LLM model settings (shared across profiles) |
 | `.tsu/confluence.json`        | Confluence target for `tech` profile        |
 | `.tsu/confluence-{name}.json` | Confluence target for custom profile        |
-| `.tsu/generate.md`            | Prompt template for `tech` profile          |
-| `.tsu/generate-{name}.md`    | Prompt template for custom profile          |
+| `.tsu/generate.md`            | Prompt file for `tech` profile              |
+| `.tsu/generate-{name}.md`    | Prompt file for custom profile              |
 | `.tsu/document.md`            | Generated output for `tech` profile         |
 | `.tsu/document-{name}.md`    | Generated output for custom profile         |
