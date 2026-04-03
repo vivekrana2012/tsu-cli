@@ -1,7 +1,7 @@
 """Project analysis and document generation using GitHub Copilot SDK.
 
 Uses the Copilot CLI agent to autonomously explore a project directory
-and produce a tech documentation markdown file.
+and produce a documentation markdown file.
 """
 
 from __future__ import annotations
@@ -13,13 +13,51 @@ from rich.console import Console
 from rich.spinner import Spinner
 from rich.live import Live
 
-from copilot import CopilotClient, PermissionHandler
+from copilot import CopilotClient, PermissionHandler, PermissionRequestResult
+
+try:
+    from copilot.types import SubprocessConfig as _SubprocessConfig
+except ImportError:  # older SDK without SubprocessConfig
+    _SubprocessConfig = None
 
 from jinja2 import Template
 
-from tsu_cli.config import get_document_path, get_prompt_path, read_config, DEFAULT_PROFILE
+from tsu_cli.config import (
+    TSU_DIR,
+    _document_filename,
+    get_document_path,
+    get_prompt_path,
+    read_config,
+    safe_write_text,
+    validate_write_path,
+    DEFAULT_PROFILE,
+)
 
 console = Console()
+
+
+def _make_permission_handler(project_dir: Path):
+    """Return a Copilot permission handler that restricts file writes.
+
+    * **write** – approved only when the target path resolves inside
+      ``project_dir/.tsu/``.
+    * **everything else** – approved (the agent needs read, shell, tool,
+      and MCP access to explore the project).
+    """
+
+    def handler(request, _invocation=None):  # noqa: ANN001
+        kind = request.kind if isinstance(request.kind, str) else request.kind.value
+
+        if kind == "write":
+            try:
+                validate_write_path(Path(request.file_name), project_dir)
+                return PermissionRequestResult(kind="approved")
+            except (ValueError, OSError):
+                return PermissionRequestResult(kind="denied-by-rules")
+
+        return PermissionRequestResult(kind="approved")
+
+    return handler
 
 
 async def _list_models() -> list[str]:
@@ -61,7 +99,6 @@ async def _run_generation(
     model: str | None = None,
     output: Path | None = None,
     extra_instructions: str = "",
-    existing_html: str = "",
     profile: str = DEFAULT_PROFILE,
 ) -> Path:
     """Run the Copilot agent to analyze the project and generate documentation.
@@ -71,7 +108,6 @@ async def _run_generation(
         model: LLM model to use (overrides config).
         output: Output file path (overrides config).
         extra_instructions: Additional instructions appended to the prompt.
-        existing_html: Existing Confluence page HTML to use as reference context.
         profile: Document profile name.
 
     Returns:
@@ -97,7 +133,14 @@ async def _run_generation(
     if extra_instructions:
         additional = f"\n# Additional Instructions\n\n{extra_instructions}\n"
 
-    # Load and render the prompt template from .tsu/generate.md (or profile variant)
+    # Load bundled system prompt (never user-editable)
+    from importlib import resources
+
+    system_text = (
+        resources.files("tsu_cli.prompts") / "system.md"
+    ).read_text(encoding="utf-8")
+
+    # Load user's profile prompt (the document-structure sections)
     prompt_path = get_prompt_path(project_dir, profile)
     if not prompt_path.exists():
         console.print(
@@ -105,12 +148,16 @@ async def _run_generation(
             f"{prompt_path}\nRun [bold]tsu init --profile {profile}[/bold] first."
         )
         raise SystemExit(1)
+    user_sections = prompt_path.read_text(encoding="utf-8")
+
+    # Compose: system prompt wraps user sections and appends output rules
     prompt = Template(
-        prompt_path.read_text(encoding="utf-8"),
+        system_text,
         keep_trailing_newline=True,
     ).render(
+        user_sections=user_sections,
         additional_instructions=additional,
-        existing_document=existing_html,
+        document_filename=_document_filename(profile),
     )
 
     # Collect the final response
@@ -125,14 +172,26 @@ async def _run_generation(
             done.set()
 
     # Start Copilot client with cwd set to project directory
-    client = CopilotClient({"cwd": str(project_dir)})
+    if _SubprocessConfig is not None:
+        client = CopilotClient(_SubprocessConfig(cwd=str(project_dir)))
+    else:
+        client = CopilotClient({"cwd": str(project_dir)})
     await client.start()
 
     try:
-        async with await client.create_session({
-            "model": model,
-            "on_permission_request": PermissionHandler.approve_all,
-        }) as session:
+        try:
+            # New SDK: keyword arguments
+            session_ctx = await client.create_session(
+                model=model,
+                on_permission_request=_make_permission_handler(project_dir),
+            )
+        except TypeError:
+            # Old SDK: dict argument
+            session_ctx = await client.create_session({
+                "model": model,
+                "on_permission_request": _make_permission_handler(project_dir),
+            })
+        async with session_ctx as session:
             session.on(on_event)
 
             console.print(f"[dim]Model:[/dim] {model}")
@@ -164,8 +223,7 @@ async def _run_generation(
         content = content[:-3].strip()
 
     # Write the document
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(content + "\n", encoding="utf-8")
+    safe_write_text(output_path, content + "\n", project_dir)
 
     # Summary
     lines = content.splitlines()
@@ -186,7 +244,6 @@ def generate(
     model: str | None = None,
     output: Path | None = None,
     extra_instructions: str = "",
-    existing_html: str = "",
     profile: str = DEFAULT_PROFILE,
 ) -> Path:
     """Synchronous wrapper for the async generation process.
@@ -196,7 +253,6 @@ def generate(
         model: LLM model override.
         output: Output file path override.
         extra_instructions: Extra instructions for the prompt.
-        existing_html: Existing Confluence page HTML to use as reference context.
         profile: Document profile name.
 
     Returns:
@@ -204,5 +260,5 @@ def generate(
     """
     project_dir = project_dir or Path.cwd()
     return asyncio.run(
-        _run_generation(project_dir, model, output, extra_instructions, existing_html, profile)
+        _run_generation(project_dir, model, output, extra_instructions, profile)
     )

@@ -20,6 +20,8 @@ from tsu_cli.publisher import (
     _update_page,
     create_blank_page,
     fetch_page_html,
+    html_to_markdown,
+    pull,
     push,
 )
 
@@ -677,3 +679,106 @@ class TestHandleHttpErrorNonJsonBody:
         mock_response.text = "Bad Gateway"
         error = httpx.HTTPStatusError("502", request=MagicMock(), response=mock_response)
         _handle_http_error(error)
+
+
+# ===================================================================
+# html_to_markdown
+# ===================================================================
+
+
+class TestHtmlToMarkdown:
+    """Tests #91-94: html_to_markdown conversion."""
+
+    def test_basic_paragraph(self):
+        """#91 Basic HTML → markdown."""
+        assert html_to_markdown("<p>Hello world</p>") == "Hello world"
+
+    def test_headings(self):
+        result = html_to_markdown("<h1>Title</h1><h2>Sub</h2>")
+        assert "# Title" in result
+        assert "## Sub" in result
+
+    def test_table(self):
+        """#92 HTML table → markdown table."""
+        html = (
+            "<table><tr><th>A</th><th>B</th></tr>"
+            "<tr><td>1</td><td>2</td></tr></table>"
+        )
+        result = html_to_markdown(html)
+        assert "A" in result
+        assert "1" in result
+
+    def test_code_block(self):
+        """#93 <pre><code> → fenced code block."""
+        html = "<pre><code>print('hi')</code></pre>"
+        result = html_to_markdown(html)
+        assert "print" in result
+
+    def test_empty_string(self):
+        """#94 Empty input → empty string."""
+        assert html_to_markdown("") == ""
+
+    def test_none_like_empty(self):
+        assert html_to_markdown("") == ""
+
+    def test_strips_images(self):
+        html = "<p>Text <img src='logo.png'/> more</p>"
+        result = html_to_markdown(html)
+        assert "logo.png" not in result
+        assert "Text" in result
+
+
+# ===================================================================
+# pull
+# ===================================================================
+
+
+class TestPull:
+    """Tests #95-98: pull() — fetch, convert, write."""
+
+    @patch("tsu_cli.publisher.fetch_page_html", return_value="<p>Remote content</p>")
+    def test_writes_document(self, mock_fetch, tmp_path: Path):
+        """#95 Mock API → .tsu/document.md written with converted markdown."""
+        tsu_dir = tmp_path / ".tsu"
+        tsu_dir.mkdir()
+        doc_path = pull(tmp_path, "tech")
+        assert doc_path.exists()
+        content = doc_path.read_text()
+        assert "Remote content" in content
+
+    @patch("tsu_cli.publisher.fetch_page_html", side_effect=NoPageIDError("no id"))
+    def test_no_page_id_propagates(self, mock_fetch, tmp_path: Path):
+        """#96 No page_id → raises NoPageIDError."""
+        tsu_dir = tmp_path / ".tsu"
+        tsu_dir.mkdir()
+        with pytest.raises(NoPageIDError):
+            pull(tmp_path, "tech")
+
+    @patch("tsu_cli.publisher.fetch_page_html", return_value="<p>Ops stuff</p>")
+    def test_profile_filename(self, mock_fetch, tmp_path: Path):
+        """#97 tsu pull --profile ops → writes .tsu/document-ops.md."""
+        tsu_dir = tmp_path / ".tsu"
+        tsu_dir.mkdir()
+        doc_path = pull(tmp_path, "ops")
+        assert doc_path.name == "document-ops.md"
+        assert "Ops stuff" in doc_path.read_text()
+
+    @patch("tsu_cli.publisher.fetch_page_html", return_value="<p>Updated content</p>")
+    def test_overwrites_existing(self, mock_fetch, tmp_path: Path):
+        """#98 Existing document.md → overwritten with remote content."""
+        tsu_dir = tmp_path / ".tsu"
+        tsu_dir.mkdir()
+        doc_path = tsu_dir / "document.md"
+        doc_path.write_text("# Old content\n", encoding="utf-8")
+        result = pull(tmp_path, "tech")
+        assert result == doc_path
+        content = doc_path.read_text()
+        assert "Updated content" in content
+        assert "Old content" not in content
+
+    @patch("tsu_cli.publisher.fetch_page_html", return_value=None)
+    def test_empty_page_raises(self, mock_fetch, tmp_path: Path):
+        tsu_dir = tmp_path / ".tsu"
+        tsu_dir.mkdir()
+        with pytest.raises(RuntimeError, match="empty content"):
+            pull(tmp_path, "tech")

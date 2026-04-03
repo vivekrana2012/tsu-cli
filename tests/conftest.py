@@ -65,9 +65,8 @@ def tmp_project(tmp_path: Path) -> Path:
 
     # generate.md (tech profile prompt)
     (tsu_dir / "generate.md").write_text(
-        "# Tech Prompt\nAnalyze the project.\n"
-        "{{ additional_instructions }}\n"
-        "{{ existing_document }}\n",
+        "# Instructions\nAnalyze the project.\n\n"
+        "# Output Sections\n## Overview\nDescribe the project.\n",
         encoding="utf-8",
     )
 

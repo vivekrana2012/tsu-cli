@@ -79,7 +79,7 @@ def _make_mock_copilot(response_text: str = "# Generated Doc\n\nContent here."):
         async def stop(self):
             pass
 
-        async def create_session(self, config):
+        async def create_session(self, *args, **kwargs):
             return MockSession()
 
         async def list_models(self):
@@ -113,6 +113,7 @@ class TestGenerate:
 
         with (
             patch("tsu_cli.generator.CopilotClient", MockClient),
+            patch("tsu_cli.generator._SubprocessConfig", None),
             patch("tsu_cli.generator.PermissionHandler"),
             patch("tsu_cli.generator.Live"),
             patch("tsu_cli.generator.console"),
@@ -154,6 +155,7 @@ class TestGenerate:
 
         with (
             patch("tsu_cli.generator.CopilotClient", MockClient),
+            patch("tsu_cli.generator._SubprocessConfig", None),
             patch("tsu_cli.generator.PermissionHandler"),
             patch("tsu_cli.generator.Live"),
             patch("tsu_cli.generator.console"),
@@ -168,6 +170,7 @@ class TestGenerate:
 
         with (
             patch("tsu_cli.generator.CopilotClient", MockClient),
+            patch("tsu_cli.generator._SubprocessConfig", None),
             patch("tsu_cli.generator.PermissionHandler"),
             patch("tsu_cli.generator.Live"),
             patch("tsu_cli.generator.console"),
@@ -293,11 +296,12 @@ class TestGenerateNoResponse:
                 pass
             async def stop(self):
                 pass
-            async def create_session(self, config):
+            async def create_session(self, *args, **kwargs):
                 return MockSession()
 
         with (
             patch("tsu_cli.generator.CopilotClient", MockClient),
+            patch("tsu_cli.generator._SubprocessConfig", None),
             patch("tsu_cli.generator.PermissionHandler"),
             patch("tsu_cli.generator.Live"),
             patch("tsu_cli.generator.console"),
@@ -317,6 +321,7 @@ class TestGenerateStripsMdFences:
 
         with (
             patch("tsu_cli.generator.CopilotClient", MockClient),
+            patch("tsu_cli.generator._SubprocessConfig", None),
             patch("tsu_cli.generator.PermissionHandler"),
             patch("tsu_cli.generator.Live"),
             patch("tsu_cli.generator.console"),
@@ -335,6 +340,7 @@ class TestGenerateStripsMdFences:
 
         with (
             patch("tsu_cli.generator.CopilotClient", MockClient),
+            patch("tsu_cli.generator._SubprocessConfig", None),
             patch("tsu_cli.generator.PermissionHandler"),
             patch("tsu_cli.generator.Live"),
             patch("tsu_cli.generator.console"),
@@ -345,3 +351,113 @@ class TestGenerateStripsMdFences:
         content = result.read_text()
         assert not content.startswith("```")
         assert "# Doc" in content
+
+
+# ===================================================================
+# Permission handler tests
+# ===================================================================
+
+
+class TestPermissionHandler:
+    """Tests for _make_permission_handler — restricts Copilot agent operations."""
+
+    def _make_request(self, kind: str, file_name: str = ""):
+        """Create a mock permission request."""
+        req = MagicMock()
+        req.kind = MagicMock(value=kind)
+        req.file_name = file_name
+        return req
+
+    def test_read_approved(self, tmp_project: Path):
+        """Read requests are always approved."""
+        from tsu_cli.generator import _make_permission_handler
+
+        handler = _make_permission_handler(tmp_project)
+        req = self._make_request("read", str(tmp_project / "any" / "file.py"))
+        result = handler(req)
+        assert result.kind == "approved"
+
+    def test_write_inside_tsu_approved(self, tmp_project: Path):
+        """Write inside .tsu/ is approved."""
+        from tsu_cli.generator import _make_permission_handler
+
+        handler = _make_permission_handler(tmp_project)
+        target = str(tmp_project / ".tsu" / "document.md")
+        req = self._make_request("write", target)
+        result = handler(req)
+        assert result.kind == "approved"
+
+    def test_write_outside_tsu_denied(self, tmp_project: Path):
+        """Write outside .tsu/ is denied."""
+        from tsu_cli.generator import _make_permission_handler
+
+        handler = _make_permission_handler(tmp_project)
+        target = str(tmp_project / "leaked.md")
+        req = self._make_request("write", target)
+        result = handler(req)
+        assert result.kind == "denied-by-rules"
+
+    def test_write_traversal_denied(self, tmp_project: Path):
+        """Write with .. traversal escaping .tsu/ is denied."""
+        from tsu_cli.generator import _make_permission_handler
+
+        handler = _make_permission_handler(tmp_project)
+        target = str(tmp_project / ".tsu" / ".." / "escape.md")
+        req = self._make_request("write", target)
+        result = handler(req)
+        assert result.kind == "denied-by-rules"
+
+    def test_shell_approved(self, tmp_project: Path):
+        """Shell commands are approved (agent needs them for exploration)."""
+        from tsu_cli.generator import _make_permission_handler
+
+        handler = _make_permission_handler(tmp_project)
+        req = self._make_request("shell")
+        req.full_command_text = "ls -la"
+        result = handler(req)
+        assert result.kind == "approved"
+
+    def test_memory_approved(self, tmp_project: Path):
+        """Memory operations are approved (SDK internals)."""
+        from tsu_cli.generator import _make_permission_handler
+
+        handler = _make_permission_handler(tmp_project)
+        req = self._make_request("memory")
+        result = handler(req)
+        assert result.kind == "approved"
+
+    def test_hook_approved(self, tmp_project: Path):
+        """Hook operations are approved (SDK internals)."""
+        from tsu_cli.generator import _make_permission_handler
+
+        handler = _make_permission_handler(tmp_project)
+        req = self._make_request("hook")
+        result = handler(req)
+        assert result.kind == "approved"
+
+    def test_mcp_approved(self, tmp_project: Path):
+        """MCP tool calls are approved (agent may use them for exploration)."""
+        from tsu_cli.generator import _make_permission_handler
+
+        handler = _make_permission_handler(tmp_project)
+        req = self._make_request("mcp")
+        result = handler(req)
+        assert result.kind == "approved"
+
+    def test_url_approved(self, tmp_project: Path):
+        """URL fetches are approved."""
+        from tsu_cli.generator import _make_permission_handler
+
+        handler = _make_permission_handler(tmp_project)
+        req = self._make_request("url")
+        result = handler(req)
+        assert result.kind == "approved"
+
+    def test_custom_tool_approved(self, tmp_project: Path):
+        """Custom tool calls are approved (agent built-in tools)."""
+        from tsu_cli.generator import _make_permission_handler
+
+        handler = _make_permission_handler(tmp_project)
+        req = self._make_request("custom-tool")
+        result = handler(req)
+        assert result.kind == "approved"

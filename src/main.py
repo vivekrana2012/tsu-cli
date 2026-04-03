@@ -14,23 +14,38 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from tsu_cli.publisher import NoPageIDError
+from tsu_cli.publisher import NoPageIDError, NoCredentialsError, NoParentPageError
 import typer
 from rich.console import Console
 from rich.table import Table
 
-from tsu_cli import auth, config, generator, publisher
+from tsu_cli import __version__, auth, config, generator, publisher
 from tsu_cli.config import DEFAULT_PROFILE
 
 console = Console()
 
+
 app = typer.Typer(
     name="tsu",
-    help="Generate project tech documentation and push to Confluence.\n\nRun [bold]tsu help[/bold] for a detailed usage guide.",
-    no_args_is_help=True,
+    help=f"tsu-cli — Generate project tech documentation and push to Confluence.\n\nRun [bold]tsu help[/bold] for a detailed usage guide.",
+    no_args_is_help=False,
     rich_markup_mode="rich",
     epilog="[dim]Run [bold]tsu help[/bold] for a detailed usage guide.[/dim]",
 )
+
+
+@app.callback(invoke_without_command=True)
+def main(
+    ctx: typer.Context,
+    version: bool = typer.Option(False, "--version", "-v", help="Show version and exit.", is_eager=True),
+) -> None:
+    if version:
+        console.print(f"tsu-cli {__version__}")
+        raise typer.Exit()
+    if ctx.invoked_subcommand is None:
+        console.print(f"[bold]tsu-cli[/bold] v{__version__}\n")
+        console.print(ctx.get_help())
+        raise typer.Exit()
 
 auth_app = typer.Typer(
     name="auth",
@@ -288,8 +303,8 @@ def generate(
 
     By default, if a Confluence page already exists (page_id in the profile's
     confluence config) and credentials are available, the current page content
-    is pulled and sent to the LLM as reference so that manually added content
-    is preserved. Use --offline to skip this.
+    is pulled and saved as local markdown before generation so the agent can
+    update it incrementally. Use --offline to skip this.
     """
     project_dir = project_dir or Path.cwd()
 
@@ -310,27 +325,78 @@ def generate(
         raise SystemExit(1)
 
 
-    # Sync with Confluence (pull existing page as reference context)
-    existing_html = ""
+    # Sync with Confluence (pull existing page as local markdown)
     if not offline:
-        console.print("[dim]Syncing with Confluence page...[/dim]")
+        confluence_conf = config.read_confluence(project_dir, profile)
+        has_page_id = bool(confluence_conf.get("page_id"))
 
-        try:
-            existing_html = publisher.fetch_page_html(project_dir, profile) or ""
-            if existing_html:
-                console.print("[dim]✓ Existing page content loaded as reference[/dim]")
-            
-        except NoPageIDError as ex:
-            console.print("[dim] No existing page found [/dim]")
-        except Exception as ex:
-            console.print(f"[red]  ↳ Not able to get page: {ex}[/red]")
-            raise typer.Abort()
+        if has_page_id:
+            # page_id exists → pull is mandatory to avoid overwriting remote edits
+            console.print("[dim]Syncing with Confluence page...[/dim]")
+            try:
+                doc_path = publisher.pull(project_dir, profile)
+                console.print(f"[dim]✓ Remote page synced to {doc_path.name}[/dim]")
+            except Exception as ex:
+                console.print(f"[red]Error:[/red] Failed to sync Confluence page: {ex}")
+                console.print(
+                    "[dim]Use [bold]tsu generate --offline[/bold] to skip sync "
+                    "and generate fresh.[/dim]"
+                )
+                raise SystemExit(1)
+        else:
+            console.print("[dim]No existing Confluence page — generating fresh[/dim]")
 
     else:
         console.print("[dim]Offline mode — generating fresh[/dim]")
 
-    console.print("\n[bold]tsu generate[/bold] — Analyzing project...\n")
-    generator.generate(project_dir, model, output, extra_instructions, existing_html, profile)
+    console.print("\n[bold]tsu generate[/bold] — Analyzing...\n")
+    generator.generate(project_dir, model, output, extra_instructions, profile)
+
+
+# ---------------------------------------------------------------------------
+# tsu pull
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def pull(
+    project_dir: Optional[Path] = typer.Option(  # noqa: UP007
+        None,
+        "--dir", "-d",
+        help="Project directory (defaults to current directory).",
+    ),
+    profile: str = typer.Option(
+        DEFAULT_PROFILE,
+        "--profile", "-p",
+        help="Document profile to pull (e.g. tech, func, api).",
+    ),
+) -> None:
+    """Pull the remote Confluence page and save as local markdown.
+
+    Fetches the existing page content, converts it from Confluence storage
+    HTML to markdown, and writes it to the profile's document file
+    (e.g. .tsu/document.md). Overwrites any existing local file.
+    """
+    project_dir = project_dir or Path.cwd()
+
+    if not config.is_initialized(project_dir):
+        console.print("[red]Error:[/red] .tsu/ not initialized. Run 'tsu init' first.")
+        raise SystemExit(1)
+
+    console.print(f"\n[bold]tsu pull[/bold] — Syncing remote page (profile: {profile})...\n")
+
+    try:
+        doc_path = publisher.pull(project_dir, profile)
+        console.print(f"[green]✓[/green] Remote page saved to {doc_path}")
+    except (NoPageIDError, NoParentPageError) as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise SystemExit(1)
+    except NoCredentialsError as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise SystemExit(1)
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Error:[/red] Failed to pull page: {exc}")
+        raise SystemExit(1)
 
 
 # ---------------------------------------------------------------------------

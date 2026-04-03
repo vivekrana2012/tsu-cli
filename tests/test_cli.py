@@ -10,7 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 from tsu_cli.main import app
-from tsu_cli.publisher import NoPageIDError
+from tsu_cli.publisher import NoCredentialsError, NoPageIDError, NoParentPageError
 
 
 @pytest.fixture
@@ -45,8 +45,7 @@ def _init_tsu(project_dir: Path, profile: str = "tech", page_title: str | None =
 
     (tsu_dir / _prompt_filename(profile)).write_text(
         f"# {profile} Prompt\nAnalyze the project.\n"
-        "{{ additional_instructions }}\n"
-        "{{ existing_document }}\n",
+        "{{ additional_instructions }}\n",
         encoding="utf-8",
     )
 
@@ -148,9 +147,8 @@ class TestGenerate:
     """Tests #80-81: tsu generate CLI command."""
 
     @patch("tsu_cli.main.generator.generate")
-    @patch("tsu_cli.main.publisher.fetch_page_html", return_value=None)
-    def test_offline(self, mock_fetch, mock_gen, runner: CliRunner, tmp_path: Path):
-        """#80 tsu generate --offline → calls generator.generate."""
+    def test_offline(self, mock_gen, runner: CliRunner, tmp_path: Path):
+        """#80 tsu generate --offline → calls generator.generate without pull."""
         _init_tsu(tmp_path)
         mock_gen.return_value = tmp_path / ".tsu" / "document.md"
 
@@ -348,36 +346,71 @@ class TestModelsEmpty:
         assert result.exit_code != 0
 
 
+def _set_page_id(project_dir: Path, page_id: str, profile: str = "tech") -> None:
+    """Set page_id in the profile's confluence config."""
+    from tsu_cli.config import _confluence_filename
+    tsu_dir = project_dir / ".tsu"
+    conf_path = tsu_dir / _confluence_filename(profile)
+    conf = json.loads(conf_path.read_text())
+    conf["page_id"] = page_id
+    conf_path.write_text(json.dumps(conf, indent=2) + "\n", encoding="utf-8")
+
+
 class TestGenerateSyncPaths:
-    """Test generate with Confluence sync paths."""
+    """Tests #99-100 + sync path variants for generate with Confluence pull."""
 
     @patch("tsu_cli.main.generator.generate")
-    @patch("tsu_cli.main.publisher.fetch_page_html", return_value="<p>Existing</p>")
-    def test_sync_with_existing_page(self, mock_fetch, mock_gen, runner: CliRunner, tmp_path: Path):
-        """Sync finds existing page → passes HTML to generator."""
+    @patch("tsu_cli.main.publisher.pull")
+    def test_sync_with_existing_page(self, mock_pull, mock_gen, runner: CliRunner, tmp_path: Path):
+        """#99 page_id set → pull called, then generate called."""
         _init_tsu(tmp_path)
-        mock_gen.return_value = tmp_path / ".tsu" / "document.md"
+        _set_page_id(tmp_path, "pg123")
+        doc_path = tmp_path / ".tsu" / "document.md"
+        mock_pull.return_value = doc_path
+        mock_gen.return_value = doc_path
         result = runner.invoke(app, ["generate", "--dir", str(tmp_path)])
+        mock_pull.assert_called_once()
         mock_gen.assert_called_once()
-        # existing_html should be passed (5th positional arg)
-        call_kwargs = mock_gen.call_args
-        assert "<p>Existing</p>" in (call_kwargs.args + tuple(call_kwargs.kwargs.values()))
 
     @patch("tsu_cli.main.generator.generate")
-    @patch("tsu_cli.main.publisher.fetch_page_html", side_effect=Exception("Network error"))
-    def test_sync_exception_aborts(self, mock_fetch, mock_gen, runner: CliRunner, tmp_path: Path):
-        """Sync raises non-NoPageIDError exception → aborts."""
+    @patch("tsu_cli.main.publisher.pull", side_effect=Exception("Network error"))
+    def test_sync_exception_aborts(self, mock_pull, mock_gen, runner: CliRunner, tmp_path: Path):
+        """page_id set + pull() raises → aborts, generate not called."""
         _init_tsu(tmp_path)
+        _set_page_id(tmp_path, "pg123")
         result = runner.invoke(app, ["generate", "--dir", str(tmp_path)])
         assert result.exit_code != 0
+        mock_gen.assert_not_called()
 
     @patch("tsu_cli.main.generator.generate")
-    @patch("tsu_cli.main.publisher.fetch_page_html", side_effect=NoPageIDError("No page"))
-    def test_sync_no_page_id_continues(self, mock_fetch, mock_gen, runner: CliRunner, tmp_path: Path):
-        """NoPageIDError during sync → continues generation."""
+    @patch("tsu_cli.main.publisher.pull")
+    def test_sync_no_page_id_skips_pull(self, mock_pull, mock_gen, runner: CliRunner, tmp_path: Path):
+        """No page_id → pull not called, generate proceeds."""
         _init_tsu(tmp_path)
         mock_gen.return_value = tmp_path / ".tsu" / "document.md"
         result = runner.invoke(app, ["generate", "--dir", str(tmp_path)])
+        mock_pull.assert_not_called()
+        mock_gen.assert_called_once()
+
+    @patch("tsu_cli.main.generator.generate")
+    @patch("tsu_cli.main.publisher.pull", side_effect=NoCredentialsError("No creds"))
+    def test_sync_no_credentials_aborts(self, mock_pull, mock_gen, runner: CliRunner, tmp_path: Path):
+        """page_id set + NoCredentialsError → aborts, generate not called."""
+        _init_tsu(tmp_path)
+        _set_page_id(tmp_path, "pg123")
+        result = runner.invoke(app, ["generate", "--dir", str(tmp_path)])
+        assert result.exit_code != 0
+        mock_gen.assert_not_called()
+
+    @patch("tsu_cli.main.generator.generate")
+    @patch("tsu_cli.main.publisher.pull")
+    def test_offline_skips_pull(self, mock_pull, mock_gen, runner: CliRunner, tmp_path: Path):
+        """#100 --offline → pull not called, generate proceeds."""
+        _init_tsu(tmp_path)
+        _set_page_id(tmp_path, "pg123")
+        mock_gen.return_value = tmp_path / ".tsu" / "document.md"
+        result = runner.invoke(app, ["generate", "--dir", str(tmp_path), "--offline"])
+        mock_pull.assert_not_called()
         mock_gen.assert_called_once()
 
 

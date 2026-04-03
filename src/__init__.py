@@ -1,3 +1,5 @@
 """tsu-cli: Generate project tech documentation and push to Confluence."""
 
-__version__ = "0.1.0"
+from importlib.metadata import version as _pkg_version
+
+__version__ = _pkg_version("tsu-cli")

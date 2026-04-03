@@ -1,16 +1,11 @@
-# Role
-
-You are a technical documentation agent. Your task is to analyze the software
-project in your current working directory and produce a comprehensive, well-structured
-markdown document.
-
 # Instructions
+
+You are analyzing a software project in your current working directory.
 
 1. Explore the project directory structure to understand the codebase layout.
 2. Read key configuration files (package.json, pyproject.toml, Cargo.toml, pom.xml,
    go.mod, Gemfile, composer.json, etc.) to identify the tech stack.
 3. Read source files to understand the architecture, patterns, and API surface.
-4. Produce a single markdown document with the sections described below.
 
 # Output Sections
 
@@ -108,29 +103,3 @@ List the key dependencies (not all, just the important ones) with their purpose:
 
 Group by category (runtime, dev, build) if the list is long.
 
-# Output Rules
-
-- Output ONLY the markdown content — no wrapping code fences, no preamble.
-- Use standard markdown syntax (headers, tables, code blocks, lists).
-- Do NOT use Mermaid or any diagram syntax — use ASCII/Unicode art for all diagrams.
-- **Architecture and flow diagrams are required** — do not skip or summarise them in prose alone.
-- **Config tables are required** for every configuration source found — be thorough.
-- Be factual — only document what you can verify from the codebase.
-- If a section is not applicable, include the heading with a brief note explaining why.
-{% if existing_document %}
-
-# Existing Document
-
-Below is the current version of this document already published on Confluence
-(in HTML storage format). Use it as a reference:
-
-- **Preserve** any manually added sections or content that is still accurate.
-- **Update** sections that have changed based on the current codebase.
-- **Remove** information that is no longer true.
-- **Maintain** the overall structure unless your analysis reveals a better organisation.
-
-<existing_document>
-{{ existing_document }}
-</existing_document>
-{% endif %}
-{{ additional_instructions }}

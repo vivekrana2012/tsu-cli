@@ -18,7 +18,9 @@ from tsu_cli.config import (
     list_profiles,
     read_config,
     read_confluence,
+    safe_write_text,
     seed_prompt,
+    validate_write_path,
     write_config,
     write_confluence,
 )
@@ -196,6 +198,62 @@ class TestPathHelpers:
         p = get_prompt_path(tmp_project, "ops")
         assert p.name == "generate-ops.md"
         assert p.parent.name == ".tsu"
+
+
+# ===================================================================
+# Path write guard
+# ===================================================================
+
+
+class TestValidateWritePath:
+    """Tests for validate_write_path — blocks writes outside .tsu/."""
+
+    def test_inside_tsu(self, tmp_project: Path):
+        """Path inside .tsu/ → returns resolved path."""
+        target = tmp_project / ".tsu" / "document.md"
+        result = validate_write_path(target, tmp_project)
+        assert result == target.resolve()
+
+    def test_nested_inside_tsu(self, tmp_project: Path):
+        """Nested path inside .tsu/ → returns resolved path."""
+        target = tmp_project / ".tsu" / "sub" / "file.md"
+        result = validate_write_path(target, tmp_project)
+        assert result == target.resolve()
+
+    def test_outside_tsu(self, tmp_project: Path):
+        """Path outside .tsu/ → raises ValueError."""
+        target = tmp_project / "leaked-file.md"
+        with pytest.raises(ValueError, match="Write blocked"):
+            validate_write_path(target, tmp_project)
+
+    def test_traversal(self, tmp_project: Path):
+        """Path with .. traversal escaping .tsu/ → raises ValueError."""
+        target = tmp_project / ".tsu" / ".." / "escape.md"
+        with pytest.raises(ValueError, match="Write blocked"):
+            validate_write_path(target, tmp_project)
+
+    def test_absolute_outside(self, tmp_path: Path):
+        """Absolute path outside project → raises ValueError."""
+        target = Path("/tmp/evil.md")
+        with pytest.raises(ValueError, match="Write blocked"):
+            validate_write_path(target, tmp_path)
+
+
+class TestSafeWriteText:
+    """Tests for safe_write_text — guarded file writing."""
+
+    def test_writes_inside_tsu(self, tmp_project: Path):
+        """Write inside .tsu/ succeeds and content is correct."""
+        target = tmp_project / ".tsu" / "output.md"
+        safe_write_text(target, "hello", tmp_project)
+        assert target.read_text(encoding="utf-8") == "hello"
+
+    def test_blocks_outside_tsu(self, tmp_project: Path):
+        """Write outside .tsu/ raises ValueError, file not created."""
+        target = tmp_project / "bad.md"
+        with pytest.raises(ValueError, match="Write blocked"):
+            safe_write_text(target, "nope", tmp_project)
+        assert not target.exists()
 
 
 # ===================================================================

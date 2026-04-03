@@ -11,10 +11,11 @@ from pathlib import Path
 
 import httpx
 import markdown as md
+from markdownify import markdownify
 from rich.console import Console
 
 from tsu_cli import auth, config
-from tsu_cli.config import DEFAULT_PROFILE
+from tsu_cli.config import DEFAULT_PROFILE, safe_write_text
 from tsu_cli.confluence_utils import (
     extract_base_url,
     extract_space_key_from_url,
@@ -250,6 +251,51 @@ def fetch_page_html(
     except Exception as exc:  # noqa: BLE001
         console.print(f"[red]  ↳ Fetch failed: {exc}[/red]")
         return None
+
+
+def html_to_markdown(html: str) -> str:
+    """Convert Confluence storage-format HTML to markdown.
+
+    Args:
+        html: Raw Confluence storage HTML string.
+
+    Returns:
+        Clean markdown string.
+    """
+    if not html:
+        return ""
+    return markdownify(html, heading_style="ATX", strip=["img"]).strip()
+
+
+def pull(
+    project_dir: Path | None = None,
+    profile: str = DEFAULT_PROFILE,
+) -> Path:
+    """Pull the remote Confluence page and save it as a local markdown file.
+
+    Fetches the page HTML, converts it to markdown, and writes it to the
+    profile's document file (e.g. ``.tsu/document.md``).
+
+    Args:
+        project_dir: Project root directory (defaults to cwd).
+        profile: Document profile name.
+
+    Returns:
+        Path to the written document file.
+
+    Raises:
+        NoPageIDError: If no page_id is configured.
+        NoParentPageError: If no parent_page_url is configured.
+        NoCredentialsError: If no credentials are available.
+    """
+    project_dir = project_dir or Path.cwd()
+    html = fetch_page_html(project_dir, profile)
+    if not html:
+        raise RuntimeError("Remote page returned empty content")
+    markdown_content = html_to_markdown(html)
+    output_path = config.get_document_path(project_dir, profile)
+    safe_write_text(output_path, markdown_content + "\n", project_dir)
+    return output_path
 
 
 def push(
