@@ -8,8 +8,8 @@
 
 # tsu-cli — Project Documentation Generator
 
-Analyze any software project with GitHub Copilot and produce a comprehensive
-markdown document, then optionally push it to Confluence.
+Analyze your code with GitHub Copilot and produce comprehensive
+markdown documents which can be pushed to remote document stores like Confluence.
 
 Supports multiple **document profiles** — generate different document types
 (tech overview, functional rules, business rules, etc.) from the same codebase.
