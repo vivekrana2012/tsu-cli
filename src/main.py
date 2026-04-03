@@ -60,41 +60,55 @@ app.add_typer(auth_app, name="auth")
 # ---------------------------------------------------------------------------
 
 
-@app.command("list-profiles")
-def list_profiles_command(
+@app.command("profiles")
+def profiles_command(
     project_dir: Optional[Path] = typer.Option(  # noqa: UP007
         None,
         "--dir", "-d",
         help="Project directory (defaults to current directory).",
     ),
 ) -> None:
-    """List all configured document profiles."""
+    """List initialized profiles and available built-in templates."""
     project_dir = project_dir or Path.cwd()
 
-    if not config.is_initialized(project_dir):
-        console.print("[red]Error:[/red] .tsu/ not initialized. Run 'tsu init' first.")
-        raise SystemExit(1)
+    initialized = config.is_initialized(project_dir)
+    profiles = config.list_profiles(project_dir) if initialized else []
+    builtin = config.list_builtin_templates()
 
-    profiles = config.list_profiles(project_dir)
-    if not profiles:
-        console.print("[yellow]No profiles found.[/yellow]")
-        raise SystemExit(0)
+    # --- Initialized profiles ---
+    if profiles:
+        table = Table(title="Initialized")
+        table.add_column("Profile", style="bold")
+        table.add_column("Prompt")
+        table.add_column("Confluence Page")
+        table.add_column("Page ID")
 
-    table = Table(title="Configured Profiles")
-    table.add_column("Profile", style="bold")
-    table.add_column("Prompt")
-    table.add_column("Confluence Page")
-    table.add_column("Page ID")
+        for p in profiles:
+            prompt_file = config._prompt_filename(p)
+            conf = config.read_confluence(project_dir, p)
+            page_title = conf.get("page_title", "") or "[dim]—[/dim]"
+            page_id = conf.get("page_id") or "[dim]—[/dim]"
+            table.add_row(p, prompt_file, page_title, str(page_id))
 
-    for p in profiles:
-        prompt_file = config._prompt_filename(p)
-        conf = config.read_confluence(project_dir, p)
-        page_title = conf.get("page_title", "") or "[dim]—[/dim]"
-        page_id = conf.get("page_id") or "[dim]—[/dim]"
-        table.add_row(p, prompt_file, page_title, str(page_id))
+        console.print()
+        console.print(table)
+    else:
+        console.print("\n[yellow]No initialized profiles.[/yellow] Run [bold]tsu init[/bold] to get started.")
 
-    console.print()
-    console.print(table)
+    # --- Available built-in templates (not yet initialized) ---
+    available = {k: v for k, v in builtin.items() if k not in profiles}
+    if available:
+        avail_table = Table(title="Available Templates")
+        avail_table.add_column("Profile", style="bold")
+        avail_table.add_column("Description")
+
+        for name, desc in available.items():
+            avail_table.add_row(name, desc)
+
+        console.print()
+        console.print(avail_table)
+        console.print("\n[dim]Run [bold]tsu init --profile <name>[/bold] to initialize a template.[/dim]")
+
     console.print()
 
 

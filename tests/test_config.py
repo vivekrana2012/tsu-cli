@@ -292,3 +292,89 @@ class TestProfileIsolation:
         # Functions still work transparently
         data = read_confluence(tmp_project, profile="tech")
         assert data["page_title"] == "TestProject - Tech Overview"
+
+
+# ===================================================================
+# seed_prompt auto-matching built-in templates
+# ===================================================================
+
+
+class TestSeedPromptAutoMatch:
+    """seed_prompt uses profile-specific built-in templates when available."""
+
+    def test_api_profile_uses_api_template(self, tmp_path: Path):
+        """tsu init --profile api_spec seeds from generate-api_spec.md, not generic."""
+        tsu_dir = tmp_path / ".tsu"
+        tsu_dir.mkdir()
+        path = seed_prompt(tmp_path, profile="api_spec")
+        assert path.name == "generate-api_spec.md"
+        content = path.read_text(encoding="utf-8")
+        # The API template mentions endpoints/schemas, not generic tech overview
+        assert "api" in content.lower() or "endpoint" in content.lower()
+
+    def test_func_profile_uses_func_template(self, tmp_path: Path):
+        """tsu init --profile func_spec seeds from generate-func_spec.md."""
+        tsu_dir = tmp_path / ".tsu"
+        tsu_dir.mkdir()
+        path = seed_prompt(tmp_path, profile="func_spec")
+        assert path.name == "generate-func_spec.md"
+        content = path.read_text(encoding="utf-8")
+        assert "business" in content.lower() or "workflow" in content.lower()
+
+    def test_security_profile_uses_security_template(self, tmp_path: Path):
+        """tsu init --profile security_spec seeds from generate-security_spec.md."""
+        tsu_dir = tmp_path / ".tsu"
+        tsu_dir.mkdir()
+        path = seed_prompt(tmp_path, profile="security_spec")
+        assert path.name == "generate-security_spec.md"
+        content = path.read_text(encoding="utf-8")
+        assert "security" in content.lower() or "auth" in content.lower()
+
+    def test_unknown_profile_falls_back_to_generic(self, tmp_path: Path):
+        """Unknown profile name falls back to generic generate.md."""
+        tsu_dir = tmp_path / ".tsu"
+        tsu_dir.mkdir()
+        path = seed_prompt(tmp_path, profile="custom-thing")
+        assert path.name == "generate-custom-thing.md"
+        content = path.read_text(encoding="utf-8")
+        # Should have generic tech overview content
+        assert "tech stack" in content.lower() or "architecture" in content.lower()
+
+    def test_auto_match_still_idempotent(self, tmp_path: Path):
+        """Existing template is not overwritten even with auto-match."""
+        tsu_dir = tmp_path / ".tsu"
+        tsu_dir.mkdir()
+        path = seed_prompt(tmp_path, profile="api_spec")
+        path.write_text("my custom api prompt", encoding="utf-8")
+
+        seed_prompt(tmp_path, profile="api_spec")
+        assert path.read_text(encoding="utf-8") == "my custom api prompt"
+
+
+# ===================================================================
+# list_builtin_templates
+# ===================================================================
+
+
+class TestListBuiltinTemplates:
+    """list_builtin_templates discovers built-in profile templates."""
+
+    def test_returns_expected_templates(self):
+        """Returns api, func, security with descriptions."""
+        from tsu_cli.config import list_builtin_templates
+
+        templates = list_builtin_templates()
+        assert "api_spec" in templates
+        assert "func_spec" in templates
+        assert "security_spec" in templates
+        # Each has a non-empty description
+        for desc in templates.values():
+            assert len(desc) > 0
+
+    def test_sorted(self):
+        """Templates are returned in sorted order."""
+        from tsu_cli.config import list_builtin_templates
+
+        templates = list_builtin_templates()
+        keys = list(templates.keys())
+        assert keys == sorted(keys)

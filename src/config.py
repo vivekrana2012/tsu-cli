@@ -179,11 +179,11 @@ def seed_prompt(
     project_dir: Path | None = None,
     profile: str = DEFAULT_PROFILE,
 ) -> Path:
-    """Copy the built-in generate.md into .tsu/ for *profile* if it doesn't already exist.
+    """Copy a built-in prompt template into .tsu/ for *profile* if it doesn't already exist.
 
-    All profiles are seeded from the same built-in ``generate.md``.
-    For the 'tech' profile the prompt works as-is.  For custom profiles the
-    user edits the seeded copy to fit their document type.
+    If a profile-specific built-in template exists (e.g. ``generate-api.md``
+    for the ``api`` profile), it is used.  Otherwise the generic
+    ``generate.md`` is used as the seed.
 
     Returns the path to the seeded prompt file.
     """
@@ -192,8 +192,13 @@ def seed_prompt(
     tsu_dir = ensure_tsu_dir(project_dir)
     prompt_path = tsu_dir / _prompt_filename(profile)
     if not prompt_path.exists():
-        builtin = resources.files("tsu_cli.prompts") / PROMPT_FILE
-        safe_write_text(prompt_path, builtin.read_text(encoding="utf-8"), project_dir)
+        prompts_pkg = resources.files("tsu_cli.prompts")
+        profile_template = prompts_pkg / f"generate-{profile}.md"
+        try:
+            source_text = profile_template.read_text(encoding="utf-8")
+        except (FileNotFoundError, TypeError):
+            source_text = (prompts_pkg / PROMPT_FILE).read_text(encoding="utf-8")
+        safe_write_text(prompt_path, source_text, project_dir)
     return prompt_path
 
 
@@ -219,3 +224,29 @@ def is_initialized(project_dir: Path | None = None) -> bool:
     """Check if the .tsu directory has been initialized."""
     tsu_dir = get_tsu_dir(project_dir)
     return (tsu_dir / CONFIG_FILE).exists()
+
+
+# Descriptions for built-in profile templates.
+BUILTIN_TEMPLATE_DESCRIPTIONS: dict[str, str] = {
+    "api_spec": "API endpoints, request/response schemas, auth, error codes",
+    "func_spec": "Business rules, workflows, validation logic, data transformations",
+    "security_spec": "Auth mechanisms, data handling, input validation, threat surface",
+}
+
+
+def list_builtin_templates() -> dict[str, str]:
+    """Return a dict mapping built-in profile names to their descriptions.
+
+    Scans the ``tsu_cli.prompts`` package for ``generate-*.md`` files and
+    pairs them with descriptions from :data:`BUILTIN_TEMPLATE_DESCRIPTIONS`.
+    """
+    from importlib import resources
+
+    prompts_pkg = resources.files("tsu_cli.prompts")
+    templates: dict[str, str] = {}
+    for item in prompts_pkg.iterdir():
+        name = getattr(item, "name", "")
+        if name.startswith("generate-") and name.endswith(".md"):
+            profile = name[len("generate-"):-len(".md")]
+            templates[profile] = BUILTIN_TEMPLATE_DESCRIPTIONS.get(profile, "")
+    return dict(sorted(templates.items()))

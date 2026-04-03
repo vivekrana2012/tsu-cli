@@ -199,12 +199,12 @@ class TestPush:
 
 
 # ===================================================================
-# tsu list-profiles
+# tsu profiles
 # ===================================================================
 
 
-class TestListProfiles:
-    """Tests #84-85: tsu list-profiles CLI command."""
+class TestProfiles:
+    """Tests #84-85: tsu profiles CLI command."""
 
     def test_output(self, runner: CliRunner, tmp_path: Path):
         """#84 Seed tech + ops profiles → both appear in output."""
@@ -213,7 +213,7 @@ class TestListProfiles:
 
         result = runner.invoke(
             app,
-            ["list-profiles", "--dir", str(tmp_path)],
+            ["profiles", "--dir", str(tmp_path)],
         )
         assert result.exit_code == 0 or result.exit_code is None
         assert "tech" in result.stdout.lower()
@@ -226,10 +226,38 @@ class TestListProfiles:
 
         result = runner.invoke(
             app,
-            ["list-profiles", "--dir", str(tmp_path)],
+            ["profiles", "--dir", str(tmp_path)],
         )
         assert "My Tech Docs" in result.stdout
         assert "Operations Runbook" in result.stdout
+
+    def test_shows_available_templates(self, runner: CliRunner, tmp_path: Path):
+        """Available templates section shows built-in templates not yet initialized."""
+        _init_tsu(tmp_path, "tech", page_title="Tech Overview")
+
+        result = runner.invoke(
+            app,
+            ["profiles", "--dir", str(tmp_path)],
+        )
+        assert result.exit_code == 0 or result.exit_code is None
+        # Built-in templates (api_spec, business_rules, security_spec) should appear as available
+        assert "api_spec" in result.stdout.lower()
+        assert "func_spec" in result.stdout.lower()
+        assert "security_spec" in result.stdout.lower()
+
+    def test_hides_initialized_from_available(self, runner: CliRunner, tmp_path: Path):
+        """Initialized built-in profiles don't appear in Available Templates."""
+        _init_tsu(tmp_path, "tech", page_title="Tech Overview")
+        _init_tsu(tmp_path, "api_spec", page_title="API Spec")
+
+        result = runner.invoke(
+            app,
+            ["profiles", "--dir", str(tmp_path)],
+        )
+        # api_spec should appear in the Initialized section, not duplicated
+        # func_spec and security_spec should still appear in Available
+        assert "func_spec" in result.stdout.lower()
+        assert "security_spec" in result.stdout.lower()
 
 
 # ===================================================================
@@ -314,26 +342,26 @@ class TestErrorPaths:
 # ===================================================================
 
 
-class TestListProfilesNotInitialized:
-    """list-profiles when .tsu/ doesn't exist."""
+class TestProfilesNotInitialized:
+    """profiles when .tsu/ doesn't exist."""
 
     def test_not_initialized(self, runner: CliRunner, tmp_path: Path):
-        """Not initialized → exit code 1."""
-        result = runner.invoke(app, ["list-profiles", "--dir", str(tmp_path)])
-        assert result.exit_code != 0
-        assert "not initialized" in result.stdout.lower() or "tsu init" in result.stdout.lower()
+        """Not initialized → shows available templates + no initialized message."""
+        result = runner.invoke(app, ["profiles", "--dir", str(tmp_path)])
+        # Should still show available templates even without .tsu/
+        assert "no initialized" in result.stdout.lower() or "tsu init" in result.stdout.lower()
 
 
-class TestListProfilesEmpty:
-    """list-profiles when .tsu/ exists but no profiles."""
+class TestProfilesEmpty:
+    """profiles when .tsu/ exists but no profiles."""
 
     def test_no_profiles(self, runner: CliRunner, tmp_path: Path):
-        """No profiles → shows warning."""
+        """No profiles → shows no initialized + available templates."""
         tsu_dir = tmp_path / ".tsu"
         tsu_dir.mkdir()
         (tsu_dir / "config.json").write_text(json.dumps({"model": "gpt-4o"}))
-        result = runner.invoke(app, ["list-profiles", "--dir", str(tmp_path)])
-        assert "no profiles" in result.stdout.lower()
+        result = runner.invoke(app, ["profiles", "--dir", str(tmp_path)])
+        assert "no initialized" in result.stdout.lower() or "tsu init" in result.stdout.lower()
 
 
 class TestModelsEmpty:
