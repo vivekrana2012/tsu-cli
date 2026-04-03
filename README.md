@@ -36,6 +36,17 @@ tsu generate
 tsu push
 ```
 
+### What happens during setup
+
+1. **`tsu init`** creates a `.tsu/` directory with configuration and a prompt template.
+2. If you provide a Confluence parent page URL and credentials, a blank placeholder
+   page is created immediately — locking the `page_id` so future pushes (including
+   CI/CD) update the same page instead of creating duplicates.
+3. **`tsu generate`** sends your codebase to a Copilot-powered LLM and writes
+   `.tsu/document.md`. If a Confluence page already exists, its content is pulled
+   first so manual edits are preserved.
+4. **`tsu push`** converts the markdown to Confluence storage format and uploads it.
+
 ## Commands
 
 ### `tsu init`
@@ -51,7 +62,13 @@ duplicates. Re-running `tsu init` preserves the existing `page_id`.
 ```bash
 tsu init
 tsu init --dir /path/to/project
+tsu init --profile func        # initialize a custom profile
 ```
+
+| Flag | Description | Default |
+| ---- | ----------- | ------- |
+| `-d, --dir` | Project directory | current directory |
+| `-p, --profile` | Profile name | `tech` |
 
 ### `tsu generate`
 
@@ -66,7 +83,58 @@ tsu generate
 tsu generate --model claude-sonnet-4.5
 tsu generate --output custom-doc.md
 tsu generate --extra "Focus on the authentication flow"
-tsu generate --offline    # skip Confluence sync, generate fresh
+tsu generate --offline           # skip Confluence sync, generate fresh
+tsu generate --profile func      # generate for a specific profile
+```
+
+| Flag | Description | Default |
+| ---- | ----------- | ------- |
+| `-d, --dir` | Project directory | current directory |
+| `-m, --model` | LLM model name (`auto` uses SDK default) | value in `config.json` |
+| `-o, --output` | Output file path | `.tsu/document.md` |
+| `-e, --extra` | One-off instructions appended to the prompt | — |
+| `-p, --profile` | Profile name | `tech` |
+| `--offline` | Skip Confluence sync, generate fresh from codebase only | off |
+
+### `tsu push`
+
+Upload `.tsu/document.md` to Confluence. Creates a new page on first push,
+updates the existing page on subsequent pushes (version is incremented
+automatically).
+
+```bash
+tsu push
+tsu push --profile func
+```
+
+| Flag | Description | Default |
+| ---- | ----------- | ------- |
+| `-d, --dir` | Project directory | current directory |
+| `-p, --profile` | Profile name | `tech` |
+
+### `tsu pull`
+
+Fetch the remote Confluence page as markdown and save it locally. Requires a
+`page_id` in the profile's Confluence config.
+
+```bash
+tsu pull
+tsu pull --profile func
+```
+
+| Flag | Description | Default |
+| ---- | ----------- | ------- |
+| `-d, --dir` | Project directory | current directory |
+| `-p, --profile` | Profile name | `tech` |
+
+### `tsu list-profiles`
+
+Show all initialized profiles with their prompt file, Confluence page title,
+and page ID.
+
+```bash
+tsu list-profiles
+tsu list-profiles --dir /path/to/project
 ```
 
 ### `tsu models`
@@ -75,15 +143,6 @@ List available LLM models from the Copilot SDK.
 
 ```bash
 tsu models
-```
-
-### `tsu push`
-
-Upload `.tsu/document.md` to Confluence. Creates a new page on first push,
-updates the existing page on subsequent pushes.
-
-```bash
-tsu push
 ```
 
 ### `tsu help`
@@ -105,16 +164,66 @@ tsu auth status   # Check credential configuration
 tsu auth clear    # Remove stored credentials
 ```
 
+### `tsu --version`
+
+Print the installed version.
+
+```bash
+tsu --version
+tsu -v
+```
+
+## Profiles
+
+Profiles let you maintain **multiple independent documents** from the same
+project — for example a *tech overview*, a *functional spec*, and an *API
+reference* — each with its own prompt template, Confluence page, and output
+file.
+
+The default profile is **`tech`**. Create additional profiles by passing
+`--profile <name>` to `init`, `generate`, `push`, or `pull`.
+
+### Creating and using profiles
+
+```bash
+# Initialize profiles
+tsu init                        # creates the default "tech" profile
+tsu init --profile func         # creates a "func" profile
+tsu init --profile api          # creates an "api" profile
+
+# Generate & push per profile
+tsu generate --profile func
+tsu push --profile api
+
+# See all profiles
+tsu list-profiles
+```
+
+### Per-profile files
+
+Each profile gets its own set of files inside `.tsu/`:
+
+| File type | `tech` (default) | Custom profile `{name}` |
+| --------- | ----------------- | ----------------------- |
+| Confluence config | `confluence.json` | `confluence-{name}.json` |
+| Prompt template | `generate.md` | `generate-{name}.md` |
+| Generated output | `document.md` | `document-{name}.md` |
+
+`config.json` (model selection) is shared across all profiles.
+
+Re-running `tsu init` for an existing profile preserves the `page_id` and
+will not overwrite an edited prompt template.
+
 ## Configuration
 
 All config lives in `.tsu/` (safe to commit — no secrets):
 
-| File               | Purpose                              |
-| ------------------ | ------------------------------------ |
-| `config.json`      | Tool settings (model, output file)   |
-| `confluence.json`  | Confluence page target               |
-| `generate.md`      | Prompt template (editable)           |
-| `document.md`      | Generated documentation              |
+| File | Purpose |
+| ---- | ------- |
+| `config.json` | Shared tool settings (LLM model) |
+| `confluence.json` | Confluence page target (per profile) |
+| `generate.md` | Prompt template (per profile, editable) |
+| `document.md` | Generated documentation (per profile) |
 
 ### Confluence Credentials
 
@@ -128,15 +237,37 @@ Use environment variables for CI/CD pipelines.
 
 ## Customizing the Prompt
 
-`tsu init` copies the default prompt template to `.tsu/generate.md`. Edit it
-freely to change the document structure, sections, or instructions — your
-changes are used on every subsequent `tsu generate` run.
+`tsu init` copies the default prompt template to `.tsu/generate.md` (or
+`.tsu/generate-{profile}.md` for custom profiles). Edit it freely — your
+changes are used on every subsequent `tsu generate` run, and re-running
+`tsu init` will **not** overwrite an existing template.
 
-The template uses Jinja2 syntax. The variable `{{ additional_instructions }}`
-is populated by the `--extra` flag.
+### Default sections
 
-Re-running `tsu init` will **not** overwrite an existing `.tsu/generate.md`,
-so your edits are safe.
+The template ships with six sections. You can add, remove, reorder, or
+rewrite any of them:
+
+| # | Section | Format |
+| - | ------- | ------ |
+| 1 | **Overview** | 2-4 paragraphs — what the project does, language, framework |
+| 2 | **Tech Stack & Frameworks** | Table: Category · Technology · Version · Notes |
+| 3 | **Architecture** | Prose + ASCII/Unicode architecture diagram + flow diagram + component responsibilities table |
+| 4 | **API Endpoints** | Table: Method · Path · Description (skipped if none found) |
+| 5 | **Configuration** | Table per config source: Key · Type · Default · Required · Description |
+| 6 | **Dependencies Summary** | Table: Dependency · Version · Purpose |
+
+### How to customize
+
+- **Add a section** — append a new `## 7. Security` heading with instructions.
+- **Remove a section** — delete the heading and its instructions from the file.
+- **Change detail level** — rewrite the instructions under a heading (e.g.
+  "Write a single paragraph" instead of "Use a table").
+- **One-off tweaks** — use `--extra` without editing the template:
+  ```bash
+  tsu generate --extra "Focus on the authentication flow"
+  tsu generate --extra "Write in Japanese"
+  tsu generate --extra "Skip the dependencies section"
+  ```
 
 ## License
 
