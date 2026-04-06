@@ -123,14 +123,41 @@ tsu push --profile func
 Fetch the remote Confluence page as markdown and save it locally. Requires a
 `page_id` in the profile's Confluence config.
 
+Use `--url` to pull any Confluence page directly without `tsu init` — useful
+for cross-repo consumption (e.g. QA pulling dev docs).
+
 ```bash
 tsu pull
 tsu pull --profile func
+tsu pull --url https://acme.atlassian.net/wiki/spaces/DEV/pages/12345
 ```
 
 | Flag | Description | Default |
 | ---- | ----------- | ------- |
 | `-d, --dir` | Project directory | current directory |
+| `-p, --profile` | Profile name | `tech` |
+| `--url` | Pull a page by URL (no `tsu init` required) | — |
+
+### `tsu diff`
+
+Analyze code changes or remote page differences against current documentation.
+Produces a structured report with three sections: **What's Stale**, **What's
+New**, and **What's Wrong**. Writes to `.tsu/diff.md`.
+
+```bash
+tsu diff                  # diff against HEAD (uncommitted changes)
+tsu diff HEAD~3           # last 3 commits
+tsu diff main..feature    # branch comparison
+tsu diff --remote         # compare local doc vs live Confluence page
+tsu diff --profile api    # diff a specific profile
+```
+
+| Flag | Description | Default |
+| ---- | ----------- | ------- |
+| `ref` (positional) | Git ref to diff against | `HEAD` |
+| `-r, --remote` | Compare against live Confluence page instead of git | off |
+| `-d, --dir` | Project directory | current directory |
+| `-m, --model` | LLM model name | value in `config.json` |
 | `-p, --profile` | Profile name | `tech` |
 
 ### `tsu profiles`
@@ -230,6 +257,7 @@ Each profile gets its own set of files inside `.tsu/`:
 | Confluence config | `confluence.json` | `confluence-{name}.json` |
 | Prompt file | `generate.md` | `generate-{name}.md` |
 | Generated output | `document.md` | `document-{name}.md` |
+| Diff report | `diff.md` | `diff-{name}.md` |
 
 `config.json` (model selection) is shared across all profiles.
 
@@ -246,6 +274,7 @@ All config lives in `.tsu/` (safe to commit — no secrets):
 | `confluence.json` | Confluence page target (per profile) |
 | `generate.md` | Prompt file (per profile, editable) |
 | `document.md` | Generated documentation (per profile) |
+| `diff.md` | Diff report from `tsu diff` (per profile) |
 
 ### Confluence Credentials
 

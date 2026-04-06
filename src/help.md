@@ -249,6 +249,109 @@ tsu push --profile func_spec
 
 ---
 
+## Pull from Confluence
+
+```
+tsu pull
+```
+
+Fetch the remote Confluence page as markdown and save it locally. Useful for
+reviewing remote changes, running diffs, or editing locally before pushing back.
+
+Requires a `page_id` in the profile's Confluence config (set during `tsu init`
+or after the first `tsu push`).
+
+**Standalone pull (no init required):**
+
+Use `--url` to pull any Confluence page directly, without `tsu init`. The
+page is saved as `.tsu/document-{page_id}.md`. Useful when the consumer
+(e.g. a QA engineer) works in a separate repository.
+
+**Options:**
+
+| Flag              | Description                                       |
+| ----------------- | ------------------------------------------------- |
+| `-d`, `--dir`     | Project directory (defaults to current directory) |
+| `-p`, `--profile` | Profile to pull (defaults to `tech`)              |
+| `--url`           | Pull a page by URL (no `tsu init` required)       |
+
+**Examples:**
+
+```bash
+tsu pull                      # pull profile's page → .tsu/document.md
+tsu pull --profile api_spec   # pull API spec page
+tsu pull --url https://acme.atlassian.net/wiki/spaces/DEV/pages/12345
+```
+
+---
+
+## Diff — Documentation Change Analysis
+
+```
+tsu diff
+```
+
+Analyze code changes or remote page differences against your current
+documentation. Produces a structured report with three sections:
+
+- **What's Stale** — documentation that is no longer accurate
+- **What's New** — code/features not yet documented
+- **What's Wrong** — existing inaccuracies or inconsistencies
+
+The report is written to `.tsu/diff.md` (or `.tsu/diff-{profile}.md`)
+and a condensed version is printed to the terminal.
+
+**Two modes:**
+
+| Mode | Command | What it compares | Needs git? |
+| ---- | ------- | ---------------- | ---------- |
+| Code diff (default) | `tsu diff [ref]` | Git changes vs documentation | Yes |
+| Remote diff | `tsu diff --remote` | Local doc vs live Confluence page | No |
+
+**Options:**
+
+| Flag              | Description                                           |
+| ----------------- | ----------------------------------------------------- |
+| `ref` (positional)| Git ref to diff against (default: `HEAD`)             |
+| `-r`, `--remote`  | Compare against live Confluence page instead of git   |
+| `-d`, `--dir`     | Project directory (defaults to current directory)     |
+| `-m`, `--model`   | LLM model override                                   |
+| `-p`, `--profile` | Profile to diff (defaults to `tech`)                  |
+
+**Examples:**
+
+```bash
+# Code diff mode — what code changed, are docs stale?
+tsu diff                      # diff against HEAD (uncommitted changes)
+tsu diff HEAD~3               # last 3 commits
+tsu diff main..feature        # branch comparison
+tsu diff v1.2.0..v1.3.0       # between releases
+
+# Remote mode — did someone edit the Confluence page directly?
+tsu diff --remote
+tsu diff --remote --profile api_spec
+
+# Per-profile
+tsu diff --profile func_spec
+tsu diff HEAD~5 --profile security_spec
+```
+
+**Prerequisites:**
+
+- Code diff mode requires a git repository.
+- Remote mode requires `page_id` in the profile's Confluence config.
+- Both modes require an existing `.tsu/document.md` (run `tsu generate` first).
+
+**When to use:**
+
+- Before `tsu push` — check if docs are complete before publishing.
+- In CI on pull requests — flag PRs that make docs stale.
+- After a release — audit doc coverage for the release diff.
+- On a schedule — weekly doc health checks.
+- Before `tsu generate` — check if someone edited the Confluence page directly.
+
+---
+
 ## Authentication
 
 ### Confluence Credentials
@@ -317,6 +420,10 @@ After the initial setup, the day-to-day loop is just:
 
 **`tsu generate [--profile X]` → review → `tsu push [--profile X]`**
 
+Or with diff-driven workflow:
+
+**`tsu diff` → review report → `tsu generate` (if needed) → `tsu push`**
+
 ---
 
 ## Files Reference
@@ -330,3 +437,5 @@ After the initial setup, the day-to-day loop is just:
 | `.tsu/generate-{name}.md`    | Prompt file for custom profile              |
 | `.tsu/document.md`            | Generated output for `tech` profile         |
 | `.tsu/document-{name}.md`    | Generated output for custom profile         |
+| `.tsu/diff.md`                | Diff report for `tech` profile              |
+| `.tsu/diff-{name}.md`        | Diff report for custom profile              |
