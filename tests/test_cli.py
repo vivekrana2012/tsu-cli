@@ -478,3 +478,52 @@ class TestHelpCommand:
         """tsu help → renders help.md content."""
         result = runner.invoke(app, ["help"])
         assert result.exit_code == 0 or result.exit_code is None
+
+
+# ===================================================================
+# tsu pull --url (standalone pull without init)
+# ===================================================================
+
+
+class TestPullStandalone:
+    """Tests for tsu pull --url (no init required)."""
+
+    SAMPLE_URL = "https://acme.atlassian.net/wiki/spaces/DEV/pages/12345/My+Doc"
+
+    @patch("tsu_cli.main.publisher.pull_by_url")
+    def test_pull_by_url_succeeds_without_init(self, mock_pull, runner: CliRunner, tmp_path: Path):
+        """tsu pull --url <url> succeeds without .tsu/ init."""
+        mock_pull.return_value = tmp_path / ".tsu" / "document-12345.md"
+        result = runner.invoke(app, ["pull", "--dir", str(tmp_path), "--url", self.SAMPLE_URL])
+        assert result.exit_code == 0
+        mock_pull.assert_called_once_with(self.SAMPLE_URL, tmp_path)
+
+    @patch("tsu_cli.main.publisher.pull_by_url", side_effect=NoCredentialsError("no creds"))
+    def test_pull_by_url_no_credentials(self, mock_pull, runner: CliRunner, tmp_path: Path):
+        """tsu pull --url with no credentials → error."""
+        result = runner.invoke(app, ["pull", "--dir", str(tmp_path), "--url", self.SAMPLE_URL])
+        assert result.exit_code != 0
+        assert "no creds" in result.stdout.lower() or "Error" in result.stdout
+
+    @patch("tsu_cli.main.publisher.pull_by_url", side_effect=ValueError("Could not extract page_id"))
+    def test_pull_by_url_invalid_url(self, mock_pull, runner: CliRunner, tmp_path: Path):
+        """tsu pull --url with bad URL → error."""
+        result = runner.invoke(app, ["pull", "--dir", str(tmp_path), "--url", "https://example.com/nope"])
+        assert result.exit_code != 0
+        assert "page_id" in result.stdout.lower() or "Error" in result.stdout
+
+    def test_pull_url_with_profile_errors(self, runner: CliRunner, tmp_path: Path):
+        """tsu pull --url --profile → error (mutually exclusive)."""
+        result = runner.invoke(app, [
+            "pull", "--dir", str(tmp_path),
+            "--url", self.SAMPLE_URL,
+            "--profile", "func",
+        ])
+        assert result.exit_code != 0
+        assert "--profile" in result.stdout
+
+    def test_pull_without_url_still_requires_init(self, runner: CliRunner, tmp_path: Path):
+        """tsu pull (no --url) without init → error."""
+        result = runner.invoke(app, ["pull", "--dir", str(tmp_path)])
+        assert result.exit_code != 0
+        assert "not initialized" in result.stdout.lower() or "tsu init" in result.stdout

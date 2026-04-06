@@ -18,6 +18,7 @@ from tsu_cli import auth, config
 from tsu_cli.config import DEFAULT_PROFILE, safe_write_text
 from tsu_cli.confluence_utils import (
     extract_base_url,
+    extract_page_id_from_url,
     extract_space_key_from_url,
     get_space_key_from_page,
     resolve_page_id,
@@ -294,6 +295,59 @@ def pull(
         raise RuntimeError("Remote page returned empty content")
     markdown_content = html_to_markdown(html)
     output_path = config.get_document_path(project_dir, profile)
+    safe_write_text(output_path, markdown_content + "\n", project_dir)
+    return output_path
+
+
+def pull_by_url(
+    url: str,
+    project_dir: Path | None = None,
+) -> Path:
+    """Pull a Confluence page by URL without requiring tsu init.
+
+    Extracts the base URL and page_id from the given URL, fetches the page
+    HTML, converts it to markdown, and writes it to ``.tsu/document-{page_id}.md``.
+
+    Args:
+        url: Full Confluence page URL.
+        project_dir: Project root directory (defaults to cwd).
+
+    Returns:
+        Path to the written document file.
+
+    Raises:
+        ValueError: If page_id cannot be extracted from the URL.
+        NoCredentialsError: If no credentials are available.
+        RuntimeError: If the remote page returns empty content.
+    """
+    project_dir = project_dir or Path.cwd()
+
+    page_id = extract_page_id_from_url(url)
+    if not page_id:
+        raise ValueError(f"Could not extract page_id from URL: {url}")
+
+    base_url = extract_base_url(url)
+    token = auth.get_token(prompt_if_missing=False)
+    if not token:
+        raise NoCredentialsError("No Confluence credentials found (set via tsu auth set or env vars)")
+
+    headers = _build_headers(token)
+    try:
+        with httpx.Client(headers=headers, timeout=15.0) as client:
+            api_url = f"{base_url}/rest/api/content/{page_id}"
+            resp = client.get(api_url, params={"expand": "body.storage,version"})
+            resp.raise_for_status()
+            data = resp.json()
+            html = data.get("body", {}).get("storage", {}).get("value")
+    except httpx.HTTPStatusError as exc:
+        raise RuntimeError(f"Failed to fetch page {page_id}: {exc.response.status_code}") from exc
+
+    if not html:
+        raise RuntimeError("Remote page returned empty content")
+
+    markdown_content = html_to_markdown(html)
+    tsu_dir = config.ensure_tsu_dir(project_dir)
+    output_path = tsu_dir / f"document-{page_id}.md"
     safe_write_text(output_path, markdown_content + "\n", project_dir)
     return output_path
 

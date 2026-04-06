@@ -4,6 +4,7 @@ Commands:
     tsu init       — Interactive setup, creates .tsu/ config directory
     tsu generate   — Analyze project with Copilot and produce document.md
     tsu push       — Upload document.md to Confluence
+    tsu pull       — Pull remote Confluence page as local markdown
     tsu auth set   — Store Confluence credentials in system keychain
     tsu auth clear — Remove stored credentials
     tsu auth status — Show credential configuration status
@@ -19,7 +20,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from tsu_cli import __version__, auth, config, generator, publisher
+from tsu_cli import __version__, auth, config, diff, generator, publisher
 from tsu_cli.config import DEFAULT_PROFILE
 
 console = Console()
@@ -384,15 +385,46 @@ def pull(
         "--profile", "-p",
         help="Document profile to pull (e.g. tech, func, api).",
     ),
+    url: Optional[str] = typer.Option(  # noqa: UP007
+        None,
+        "--url",
+        help="Full Confluence page URL. Pulls without requiring tsu init.",
+    ),
 ) -> None:
     """Pull the remote Confluence page and save as local markdown.
 
     Fetches the existing page content, converts it from Confluence storage
     HTML to markdown, and writes it to the profile's document file
     (e.g. .tsu/document.md). Overwrites any existing local file.
+
+    Use --url to pull a page directly without tsu init. The page_id is
+    extracted from the URL and saved as .tsu/document-<page_id>.md.
     """
     project_dir = project_dir or Path.cwd()
 
+    if url:
+        # Standalone mode — no init required
+        if profile != DEFAULT_PROFILE:
+            console.print("[red]Error:[/red] --profile cannot be used with --url.")
+            raise SystemExit(1)
+
+        console.print(f"\n[bold]tsu pull[/bold] — Fetching page from URL...\n")
+
+        try:
+            doc_path = publisher.pull_by_url(url, project_dir)
+            console.print(f"[green]✓[/green] Remote page saved to {doc_path}")
+        except ValueError as exc:
+            console.print(f"[red]Error:[/red] {exc}")
+            raise SystemExit(1)
+        except NoCredentialsError as exc:
+            console.print(f"[red]Error:[/red] {exc}")
+            raise SystemExit(1)
+        except Exception as exc:  # noqa: BLE001
+            console.print(f"[red]Error:[/red] Failed to pull page: {exc}")
+            raise SystemExit(1)
+        return
+
+    # Profile mode — requires init
     if not config.is_initialized(project_dir):
         console.print("[red]Error:[/red] .tsu/ not initialized. Run 'tsu init' first.")
         raise SystemExit(1)
@@ -454,6 +486,102 @@ def push(
 
     console.print(f"\n[bold]tsu push[/bold] — Uploading to Confluence (profile: {profile})...\n")
     publisher.push(project_dir, profile)
+
+
+# ---------------------------------------------------------------------------
+# tsu diff
+# ---------------------------------------------------------------------------
+
+
+@app.command("diff")
+def diff_command(
+    ref: Optional[str] = typer.Argument(  # noqa: UP007
+        None,
+        help="Git ref to diff against (e.g. HEAD, HEAD~3, main). Defaults to HEAD.",
+    ),
+    remote: bool = typer.Option(
+        False,
+        "--remote", "-r",
+        help="Compare local document against the live Confluence page instead of git.",
+    ),
+    project_dir: Optional[Path] = typer.Option(  # noqa: UP007
+        None,
+        "--dir", "-d",
+        help="Project directory (defaults to current directory).",
+    ),
+    model: Optional[str] = typer.Option(  # noqa: UP007
+        None,
+        "--model", "-m",
+        help="LLM model override (e.g. gpt-4o, claude-sonnet-4.5).",
+    ),
+    profile: str = typer.Option(
+        DEFAULT_PROFILE,
+        "--profile", "-p",
+        help="Document profile to diff (e.g. tech, func, api).",
+    ),
+) -> None:
+    """Analyze code changes or remote page differences against current documentation.
+
+    Produces a structured report with three sections: What's Stale,
+    What's New, and What's Wrong.
+
+    \b
+    Code diff mode (default):
+        tsu diff              # diff against HEAD (uncommitted changes)
+        tsu diff HEAD~3       # diff against last 3 commits
+        tsu diff main         # diff against main branch
+
+    \b
+    Remote mode:
+        tsu diff --remote     # compare local doc vs live Confluence page
+    """
+    project_dir = project_dir or Path.cwd()
+
+    if not config.is_initialized(project_dir):
+        console.print(
+            "[red]Error:[/red] .tsu/ not initialized. "
+            "Run 'tsu init' first."
+        )
+        raise SystemExit(1)
+
+    # Check that the document exists
+    doc_path = config.get_document_path(project_dir, profile)
+    if not doc_path.exists():
+        console.print(
+            f"[red]Error:[/red] No document found at {doc_path}\n"
+            f"Run [bold]tsu generate --profile {profile}[/bold] first."
+        )
+        raise SystemExit(1)
+
+    if remote:
+        # Remote mode — compare local doc vs Confluence page
+        console.print(f"\n[bold]tsu diff[/bold] — Comparing against Confluence page (profile: {profile})...\n")
+        confluence_conf = config.read_confluence(project_dir, profile)
+        if not confluence_conf.get("page_id"):
+            console.print(
+                f"[red]Error:[/red] No page_id configured for profile '{profile}'.\n"
+                f"Run [bold]tsu push --profile {profile}[/bold] first, or use "
+                "code diff mode: [bold]tsu diff[/bold]"
+            )
+            raise SystemExit(1)
+
+        try:
+            change_context = diff.get_remote_diff(project_dir, profile)
+        except Exception as exc:  # noqa: BLE001
+            console.print(f"[red]Error:[/red] Failed to fetch remote page: {exc}")
+            raise SystemExit(1)
+    else:
+        # Code diff mode — git-based
+        git_ref = ref or "HEAD"
+        console.print(f"\n[bold]tsu diff[/bold] — Analyzing changes against {git_ref} (profile: {profile})...\n")
+
+        try:
+            change_context = diff.get_git_diff(project_dir, git_ref)
+        except RuntimeError as exc:
+            console.print(f"[red]Error:[/red] {exc}")
+            raise SystemExit(1)
+
+    diff.run_diff(project_dir, change_context, model, profile)
 
 
 # ---------------------------------------------------------------------------

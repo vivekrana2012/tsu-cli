@@ -22,6 +22,7 @@ from tsu_cli.publisher import (
     fetch_page_html,
     html_to_markdown,
     pull,
+    pull_by_url,
     push,
 )
 
@@ -782,3 +783,80 @@ class TestPull:
         tsu_dir.mkdir()
         with pytest.raises(RuntimeError, match="empty content"):
             pull(tmp_path, "tech")
+
+
+# ===================================================================
+# pull_by_url (standalone pull without init)
+# ===================================================================
+
+
+class TestPullByUrl:
+    """Tests for pull_by_url() — standalone pull via direct URL."""
+
+    SAMPLE_URL = "https://acme.atlassian.net/wiki/spaces/DEV/pages/12345/My+Doc"
+
+    def _mock_api(self, html="<p>Remote content</p>"):
+        """Return a mock httpx client configured to return the given HTML."""
+        client = _mock_client()
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.raise_for_status = MagicMock()
+        resp.json.return_value = {
+            "body": {"storage": {"value": html}},
+            "version": {"number": 1},
+        }
+        client.get.return_value = resp
+        return client
+
+    @patch("httpx.Client")
+    @patch("tsu_cli.publisher.auth.get_token", return_value="fake-token")
+    def test_writes_document_with_page_id(self, mock_token, MockClient, tmp_path: Path):
+        """Happy path: fetches page and writes .tsu/document-12345.md."""
+        MockClient.return_value = self._mock_api()
+        doc_path = pull_by_url(self.SAMPLE_URL, tmp_path)
+        assert doc_path.name == "document-12345.md"
+        assert doc_path.exists()
+        assert "Remote content" in doc_path.read_text()
+
+    @patch("httpx.Client")
+    @patch("tsu_cli.publisher.auth.get_token", return_value="fake-token")
+    def test_creates_tsu_dir_if_missing(self, mock_token, MockClient, tmp_path: Path):
+        """Creates .tsu/ directory when it doesn't exist."""
+        tsu_dir = tmp_path / ".tsu"
+        assert not tsu_dir.exists()
+        MockClient.return_value = self._mock_api()
+        doc_path = pull_by_url(self.SAMPLE_URL, tmp_path)
+        assert tsu_dir.exists()
+        assert doc_path.exists()
+
+    @patch("tsu_cli.publisher.auth.get_token", return_value=None)
+    def test_no_credentials_raises(self, mock_token, tmp_path: Path):
+        """No token → raises NoCredentialsError."""
+        with pytest.raises(NoCredentialsError):
+            pull_by_url(self.SAMPLE_URL, tmp_path)
+
+    @patch("httpx.Client")
+    @patch("tsu_cli.publisher.auth.get_token", return_value="fake-token")
+    def test_empty_content_raises(self, mock_token, MockClient, tmp_path: Path):
+        """Empty page body → raises RuntimeError."""
+        MockClient.return_value = self._mock_api(html="")
+        with pytest.raises(RuntimeError, match="empty content"):
+            pull_by_url(self.SAMPLE_URL, tmp_path)
+
+    def test_invalid_url_raises(self, tmp_path: Path):
+        """URL without page_id → raises ValueError."""
+        with pytest.raises(ValueError, match="Could not extract page_id"):
+            pull_by_url("https://acme.atlassian.net/wiki/spaces/DEV", tmp_path)
+
+    @patch("httpx.Client")
+    @patch("tsu_cli.publisher.auth.get_token", return_value="fake-token")
+    def test_overwrites_existing(self, mock_token, MockClient, tmp_path: Path):
+        """Repeated pull overwrites the file."""
+        tsu_dir = tmp_path / ".tsu"
+        tsu_dir.mkdir()
+        (tsu_dir / "document-12345.md").write_text("# Old\n", encoding="utf-8")
+        MockClient.return_value = self._mock_api()
+        doc_path = pull_by_url(self.SAMPLE_URL, tmp_path)
+        content = doc_path.read_text()
+        assert "Remote content" in content
+        assert "Old" not in content

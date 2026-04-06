@@ -290,7 +290,53 @@ tsu push                    # push updated version back
 
 ---
 
-## 8. Doc Drift Detection in CI
+## 8. Cross-Repo Doc Consumption (QA / Standalone Pull)
+
+Pull a Confluence page directly by URL — no `tsu init` required. Useful when
+the consumer (e.g. a QA engineer) works in a separate repository and just
+needs the dev team's documentation as a local markdown file.
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                     Dev Team Repo                                │
+│                                                                  │
+│  tsu init → tsu generate → tsu push ──┐                         │
+│                                        │                         │
+└────────────────────────────────────────┼─────────────────────────┘
+                                         │
+                                         ▼
+                                  ┌─────────────┐
+                                  │  Confluence  │
+                                  │  Tech Page   │
+                                  │  (page 12345)│
+                                  └──────┬──────┘
+                                         │
+┌────────────────────────────────────────┼─────────────────────────┐
+│                     QA / Consumer Repo │                         │
+│                                        │                         │
+│  tsu pull --url <page_url> ◀───────────┘                        │
+│       │                                                          │
+│       ▼                                                          │
+│  .tsu/document-12345.md                                          │
+│                                                                  │
+│  • No tsu init needed                                            │
+│  • No config.json, no prompt files                               │
+│  • Just the page content as markdown                             │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+```bash
+# In the QA repo (no .tsu/ directory, no tsu init)
+tsu auth set                # one-time: store Confluence credentials
+tsu pull --url https://acme.atlassian.net/wiki/spaces/DEV/pages/12345/Tech+Overview
+
+# Use the doc to inform test cases, review specs, etc.
+cat .tsu/document-12345.md
+```
+
+---
+
+## 9. Doc Drift Detection in CI
 
 Catch outdated documentation automatically. Run `tsu generate` in CI and
 check whether the output differs from what's committed — if it does, someone
@@ -324,7 +370,7 @@ changed code without updating docs.
 
 ---
 
-## 9. PR-Driven Doc Review
+## 10. PR-Driven Doc Review
 
 Generate docs on a feature branch so reviewers see how the architecture or
 API surface changed — right alongside the code diff.
@@ -358,7 +404,7 @@ CI check ensures developers don't forget to regenerate before opening a PR.
 
 ---
 
-## 10. Merge Conflict Resolution via Regeneration
+## 11. Merge Conflict Resolution via Regeneration
 
 When `git merge` produces conflicts in `.tsu/document.md`, don't resolve
 them manually — regenerate the document from the merged codebase. The LLM
@@ -400,7 +446,7 @@ hand-written — the merged codebase is the source of truth.
 
 ---
 
-## 11. Release-Tagged Doc Snapshots
+## 12. Release-Tagged Doc Snapshots
 
 Generate a documentation snapshot for each release. Use a dedicated profile
 so each version gets its own Confluence page — building a historical record
@@ -455,7 +501,7 @@ jobs:
 
 ---
 
-## 12. Git Hooks for Auto-Generation
+## 13. Git Hooks for Auto-Generation
 
 Use git hooks to regenerate docs automatically when code changes land —
 ensuring documentation is always current without manual intervention.
@@ -502,7 +548,7 @@ fi
 
 ---
 
-## 13. Feature Branch Documentation
+## 14. Feature Branch Documentation
 
 Create a temporary documentation profile for a feature branch. The generated
 Confluence page serves as a living design doc while the feature is being
@@ -551,4 +597,221 @@ git checkout main
 git merge feat/payments
 # optionally clean up profile files
 rm .tsu/generate-feat-payments.md .tsu/confluence-feat-payments.json
+```
+
+---
+
+## 15. Pre-Push Sanity Check with `tsu diff`
+
+Before pushing updated documentation to Confluence, run `tsu diff` to see
+what the current doc is missing relative to recent code changes. Decide
+whether to push as-is or regenerate first — no more guessing.
+
+```
+┌──────────────┐     ┌──────────┐     ┌─────────────────────────────┐
+│  Code changes│────▶│ tsu diff │────▶│ .tsu/diff.md                │
+│  (committed) │     └──────────┘     │ ┌─────────────────────────┐ │
+└──────────────┘                      │ │ What's Stale            │ │
+                                      │ │ What's New              │ │
+                                      │ │ What's Wrong            │ │
+                                      │ └─────────────────────────┘ │
+                                      └──────────────┬──────────────┘
+                                                     │
+                                          ┌──────────┴──────────┐
+                                          ▼                     ▼
+                                    Nothing stale         Sections stale
+                                    ──▶ tsu push          ──▶ tsu generate
+                                                          ──▶ tsu push
+```
+
+```bash
+# after making code changes
+tsu diff                  # diff against HEAD (uncommitted changes)
+tsu diff HEAD~3           # or check last 3 commits
+# review .tsu/diff.md — decide whether to regenerate
+tsu generate              # only if needed
+tsu push
+```
+
+---
+
+## 16. PR Gate — Doc Staleness Check in CI
+
+Run `tsu diff` in CI on every pull request to detect whether the PR
+introduces code changes that make documentation stale. Flag it as a check
+failure or leave a PR comment — catch doc rot *before* merge.
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                       CI/CD Pipeline (PR)                         │
+│                                                                   │
+│  ┌────────────────┐     ┌────────────────────┐                   │
+│  │  Checkout PR   │────▶│ tsu diff main..HEAD │──┐               │
+│  └────────────────┘     └────────────────────┘  │               │
+│                                                  │               │
+│                              ┌───────────────────┤               │
+│                              ▼                   ▼               │
+│                        All clear           Stale sections        │
+│                        ──▶ ✅ Pass         ──▶ ❌ Fail / Comment │
+│                                                                   │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+### GitHub Actions example
+
+```yaml
+- name: Check doc impact
+  run: |
+    pip install tsu-cli
+    tsu diff main..HEAD --profile tech
+    # Parse diff.md for "No stale content" / "No new undocumented content"
+    if grep -q "is now stale\|not yet documented" .tsu/diff.md; then
+      echo "::warning::This PR introduces documentation gaps. Run 'tsu generate' to update."
+    fi
+```
+
+---
+
+## 17. Post-Release Doc Audit
+
+After tagging a release, generate a diff report showing what changed between
+the previous release and the current one. Hand this to product, ops, or
+support teams as a "here's what the docs are missing" summary.
+
+```
+┌────────────┐     ┌──────────────────────┐     ┌──────────────────┐
+│ git tag    │────▶│ tsu diff v1.2.0..    │────▶│ .tsu/diff.md     │
+│  v1.3.0   │     │          v1.3.0      │     │                  │
+└────────────┘     └──────────────────────┘     │ "These sections  │
+                                                │  need updating   │
+                                                │  for v1.3.0"     │
+                                                └──────────────────┘
+```
+
+```bash
+git tag v1.3.0
+tsu diff v1.2.0..v1.3.0
+# .tsu/diff.md now summarises what changed between releases
+# Share with product/ops or use it to guide a targeted tsu generate
+```
+
+---
+
+## 18. Confluence Drift Detection with `tsu diff --remote`
+
+Detect when someone manually edited the Confluence page — added a note,
+fixed a typo, restructured sections. Before the next `tsu generate`
+overwrites those edits, see exactly what was changed on the page.
+
+```
+┌────────────┐                               ┌─────────────┐
+│  Someone   │──── edits page manually ─────▶│  Confluence  │
+│  (PM, QA)  │                               └──────┬──────┘
+└────────────┘                                       │
+                                                     │
+┌────────────────────────────────────────────────────┘
+│
+▼
+┌──────────────────┐     ┌──────────────────────────────────┐
+│ tsu diff --remote│────▶│ .tsu/diff.md                     │
+└──────────────────┘     │ What's Stale: (remote has edits) │
+                         │ What's New: (remote additions)   │
+                         │ What's Wrong: (inconsistencies)  │
+                         └──────────────────────────────────┘
+```
+
+```bash
+tsu diff --remote             # compare local doc vs live Confluence page
+# review .tsu/diff.md
+# decide: pull remote changes? regenerate? push local version?
+```
+
+This is especially useful before running `tsu generate`, which pulls the
+remote page and feeds it to the LLM. Knowing what changed remotely helps
+you decide whether to preserve or override those edits.
+
+---
+
+## 19. Scheduled Doc Health Check (CI Cron)
+
+Run `tsu diff` on a weekly schedule in CI to produce a "doc freshness"
+report. Post it to Slack, email, or a dashboard — teams get a regular
+pulse on documentation health without anyone manually auditing.
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                  Scheduled CI Job (weekly)                         │
+│                                                                   │
+│  ┌────────────────┐     ┌───────────────────┐     ┌────────────┐ │
+│  │  Checkout repo │────▶│ tsu diff HEAD~50  │────▶│ Post to    │ │
+│  └────────────────┘     └───────────────────┘     │ Slack /    │ │
+│                                                    │ Dashboard  │ │
+│                                                    └────────────┘ │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### GitHub Actions example
+
+```yaml
+on:
+  schedule:
+    - cron: "0 9 * * 1"  # every Monday at 9am
+
+jobs:
+  doc-health:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 50
+      - run: |
+          pip install tsu-cli
+          tsu diff HEAD~50 --profile tech
+      - name: Post to Slack
+        if: always()
+        run: |
+          REPORT=$(cat .tsu/diff.md)
+          curl -X POST "$SLACK_WEBHOOK" \
+            -H 'Content-type: application/json' \
+            -d "{\"text\": \"Weekly Doc Health Report:\n$REPORT\"}"
+```
+
+---
+
+## 20. Multi-Profile Drift Detection
+
+Audit each documentation profile independently. The API spec might be
+current while the security doc is stale — `tsu diff` shows that per-profile
+instead of one monolithic check.
+
+```
+┌───────────┐     ┌──────────────────────────┐     ┌────────────────────────┐
+│  Codebase │────▶│ tsu diff --profile tech  │────▶│ tech:     ✅ current   │
+│  changes  │     │ tsu diff --profile api   │     │ api:      ❌ stale     │
+│           │     │ tsu diff --profile sec   │     │ security: ❌ stale     │
+└───────────┘     └──────────────────────────┘     └────────────────────────┘
+```
+
+```bash
+tsu diff --profile tech       # .tsu/diff.md
+tsu diff --profile api        # .tsu/diff-api.md
+tsu diff --profile security   # .tsu/diff-security.md
+# each report tells you independently which profile needs regeneration
+```
+
+---
+
+## 21. Onboarding — Trust Audit for New Team Members
+
+New team member runs `tsu diff` against a broad range of commits on a
+project they're joining. The report instantly shows which parts of the
+docs are trustworthy vs. which have drifted — faster ramp-up with less
+"is this doc still accurate?" uncertainty.
+
+```bash
+# joining a new project
+git clone <repo>
+cd <repo>
+tsu diff HEAD~100             # audit docs against last 100 commits
+# .tsu/diff.md tells you what's reliable and what's stale
 ```
